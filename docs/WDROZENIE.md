@@ -179,10 +179,11 @@ Otwórz https://sport.kula.opole.pl/api/health:
 
 Workflow **Deploy** uruchamiasz ręcznie. Używa **osobnego klucza** (nie Twojego prywatnego).
 
-1. Na swoim komputerze wygeneruj klucz bez hasła:
+1. Na swoim komputerze wygeneruj klucz **bez hasła**. Gdy program zapyta o hasło (passphrase), dwa razy naciśnij Enter:
    ```powershell
-   ssh-keygen -t ed25519 -C "github-actions-rekordy" -N '""' -f $env:USERPROFILE\.ssh\rekordy_github_deploy
+   ssh-keygen -t ed25519 -C "github-actions-rekordy" -f $env:USERPROFILE\.ssh\rekordy_github_deploy
    ```
+   Nie używaj `-N '""'`. PowerShell 7 przekaże wtedy dosłownie dwa cudzysłowy i klucz dostanie hasło `""`, a GitHub Actions nie użyje klucza z hasłem. Jeśli klucz już tak powstał, usuń hasło: `ssh-keygen -p -f $env:USERPROFILE\.ssh\rekordy_github_deploy` (stare hasło: `""`, nowe: dwa razy Enter).
 2. Dodaj klucz publiczny na serwerze:
    ```powershell
    type $env:USERPROFILE\.ssh\rekordy_github_deploy.pub | ssh seohost "cat >> ~/.ssh/authorized_keys"
