@@ -22,6 +22,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "db:generate": "npm run db:generate -w @rekordy/server",
     "db:migrate": "npm run db:migrate -w @rekordy/server",
+    "hash-secret": "npm run tools -w @rekordy/server -- hash-secret",
     "package": "node scripts/package.mjs",
     "deploy": "node scripts/deploy.mjs",
     "spike:build": "node spikes/passenger-hello/build.mjs"

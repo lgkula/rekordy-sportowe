@@ -16,17 +16,21 @@ export type HealthResponse = {
   db: { ok: boolean; error?: string };
   migrations: { ok: boolean; applied?: number; pending?: string[]; error?: string };
   storage: { writable: boolean };
+  auth: { configured: boolean };
 };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** `GET /api/health`: 200 when everything is fine, 503 otherwise (used by the deploy script). */
+/**
+ * `GET /api/health` (public): 200 when everything is fine, 503 otherwise (used by the deploy
+ * script). Missing auth secrets also count as unhealthy, since nobody could log in.
+ */
 export const healthRoutes =
   (deps: HealthDeps): FastifyPluginAsync =>
   async (app) => {
-    app.get('/health', async (_request, reply) => {
+    app.get('/health', { config: { access: 'public' } }, async (_request, reply) => {
       const body: HealthResponse = {
         status: 'ok',
         version: appVersion,
@@ -35,6 +39,7 @@ export const healthRoutes =
         db: { ok: true },
         migrations: { ok: true },
         storage: { writable: await deps.checkStorage() },
+        auth: { configured: app.auth.configured },
       };
 
       try {
@@ -58,7 +63,8 @@ export const healthRoutes =
         body.migrations = { ok: false, error: 'Database unavailable' };
       }
 
-      const healthy = body.db.ok && body.migrations.ok && body.storage.writable;
+      const healthy =
+        body.db.ok && body.migrations.ok && body.storage.writable && body.auth.configured;
       body.status = healthy ? 'ok' : 'degraded';
       return reply
         .code(healthy ? 200 : 503)

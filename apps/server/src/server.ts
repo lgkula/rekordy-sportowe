@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { buildApp } from './app';
+import { createDbLimiter } from './auth/limiter';
 import { loadConfig } from './config';
 import { createDatabase } from './db/client';
 import { getMigrationStatus } from './db/migrations';
@@ -28,6 +29,7 @@ async function main(): Promise<void> {
       migrationStatus: () => getMigrationStatus(migrationQuery, config.migrationsDir),
       checkStorage: () => checkStorageWritable(config.storageDir),
     },
+    auth: { config: config.auth, limiter: createDbLimiter(database.pool) },
   });
 
   app.addHook('onClose', async () => {
@@ -46,6 +48,9 @@ async function main(): Promise<void> {
 
   await app.listen({ port: config.port, host: config.host });
   app.log.info({ version: appVersion, node: process.version, cwd: process.cwd() }, 'Started');
+  if (!app.auth.configured) {
+    app.log.error('Auth is not configured: run `node dist/tools.cjs hash-secret --write`');
+  }
 
   // Migrations are applied by the deploy script over SSH, never by Passenger workers.
   // Here we only warn, and /api/health reports the same state.

@@ -11,6 +11,7 @@ Implementation is split into parts; each has a prompt in [docs/prompts/](docs/pr
 - When something is ambiguous or not covered by PLAN.md, **ask** instead of guessing. Before implementing a part, present a short plan in Polish and wait for answers.
 - Before finishing: `npm run lint`, `npm run format:check`, `npm run typecheck`, `npm test`, `npm run build` must pass. Then update the Status table and the Decision log in PLAN.md.
 - Ask before committing, pushing or deploying.
+- API access (Part 1): every `/api/*` route needs a session by default; non-GET routes need `editor`; `/api/agent/*` needs the agent bearer token. Public routes set `config: { access: 'public' }`. On the web, hide editor-only controls with `useCanEdit()`.
 
 ## Hosting rules (PLAN.md D7, section 3.2)
 
@@ -52,6 +53,7 @@ npm test                    # Vitest (DB integration tests use TEST_DB_NAME, ski
 npm run lint | typecheck | format | format:check
 npm run db:generate         # drizzle-kit: SQL migration from schema changes (apps/server/src/db/schema.ts)
 npm run db:migrate          # apply migrations to the local DB (apps/server/.env)
+npm run hash-secret -- --write  # generate password hashes / agent token / session secret into apps/server/.env
 npm run build               # web + server bundles
 npm run package             # deploy/rekordy-sportowe.tar.gz
 npm run deploy              # package -> scp -> migrate -> selector restart -> health check

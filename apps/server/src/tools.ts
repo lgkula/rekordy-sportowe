@@ -1,3 +1,4 @@
+import { runHashSecret } from './auth/hashSecretCommand';
 import { loadConfig } from './config';
 import { runMigrations } from './db/migrations';
 
@@ -6,7 +7,7 @@ import { runMigrations } from './db/migrations';
  *   node dist/tools.cjs <command>
  * Locally: `npm run tools -w @rekordy/server -- <command>`.
  */
-const commands: Record<string, { description: string; run: () => Promise<void> }> = {
+const commands: Record<string, { description: string; run: (args: string[]) => Promise<void> }> = {
   migrate: {
     description: 'Apply pending database migrations',
     run: async () => {
@@ -18,6 +19,10 @@ const commands: Record<string, { description: string; run: () => Promise<void> }
       );
       if (status.pending.length) process.exitCode = 1;
     },
+  },
+  'hash-secret': {
+    description: 'Generate password hashes, agent token and session secret (--help)',
+    run: runHashSecret,
   },
 };
 
@@ -36,7 +41,7 @@ async function main(): Promise<void> {
     process.exitCode = name && name !== 'help' ? 1 : 0;
     return;
   }
-  await command.run();
+  await command.run(process.argv.slice(3));
 }
 
 main().catch((error: unknown) => {

@@ -7,11 +7,14 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
+import { authPlugin, type AuthOptions } from './auth/plugin';
+import { authRoutes } from './routes/auth';
 import { healthRoutes, type HealthDeps } from './routes/health';
 
 export type BuildAppOptions = {
   webDir: string;
   health: HealthDeps;
+  auth: AuthOptions;
   logger?: FastifyServerOptions['logger'];
 };
 
@@ -19,15 +22,21 @@ export type BuildAppOptions = {
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: options.logger ?? false,
-    trustProxy: true,
+    // Trust only the immediate peer (the host's LiteSpeed): request.ip is the last
+    // X-Forwarded-For entry, the one LiteSpeed added, so a client cannot dodge the login
+    // rate limit with a forged header.
+    trustProxy: (_address, hop) => hop === 0,
   }).withTypeProvider<ZodTypeProvider>();
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
+  await app.register(authPlugin, options.auth);
+
   await app.register(
     async (api) => {
       await api.register(healthRoutes(options.health));
+      await api.register(authRoutes);
     },
     { prefix: '/api' },
   );

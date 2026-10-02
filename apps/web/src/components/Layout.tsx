@@ -1,12 +1,15 @@
 import { AppShell, Burger, Group, NavLink, Title } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { NavLink as RouterNavLink, Outlet } from 'react-router';
+import { useCanEdit } from '../auth/auth';
 import { pl } from '../i18n/pl';
-import { navItems } from '../navigation';
+import { visibleNavItems } from '../navigation';
 import { ApiStatus } from './ApiStatus';
+import { RoleMenu } from './RoleMenu';
 
 export function Layout() {
   const [opened, { toggle, close }] = useDisclosure();
+  const canEdit = useCanEdit();
 
   return (
     <AppShell
@@ -26,12 +29,15 @@ export function Layout() {
             />
             <Title order={4}>{pl.appName}</Title>
           </Group>
-          <ApiStatus />
+          <Group gap="xs" wrap="nowrap">
+            <ApiStatus />
+            <RoleMenu />
+          </Group>
         </Group>
       </AppShell.Header>
 
       <AppShell.Navbar p="xs">
-        {navItems.map((item) => (
+        {visibleNavItems(canEdit).map((item) => (
           <RouterNavLink key={item.path} to={item.path} onClick={close}>
             {({ isActive }) => <NavLink component="span" label={item.label} active={isActive} />}
           </RouterNavLink>

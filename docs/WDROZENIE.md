@@ -103,6 +103,60 @@ npm run deploy
 
 Możesz też wdrożyć z GitHuba: **Actions → Deploy → Run workflow** (konfiguracja niżej).
 
+## Hasła i token (logowanie)
+
+Aplikacja ma dwa hasła i jeden token:
+
+- hasło **przeglądającego** (domyślnie `lk`): tylko odczyt
+- hasło **edytora** (silne, min. 12 znaków): pełna edycja
+- **token agenta** dla skryptu Windows: tylko wysyłanie plików FIT.
+
+W pliku `.env` są wyłącznie ich hashe, a nie same hasła. Generuje je polecenie `hash-secret`. Pyta o hasła i nie pokazuje wpisywanych znaków. Opcja `--write` zapisuje wynik od razu do `.env` i zostawia pozostałe wpisy bez zmian.
+
+**Na serwerze** (`-t` jest potrzebne, żeby można było wpisać hasło):
+
+```powershell
+ssh -t seohost "cd ~/nodejsapp/rekordy-sportowe && /opt/alt/alt-nodejs22/root/usr/bin/node dist/tools.cjs hash-secret --write"
+```
+
+Potem **zrestartuj aplikację** (patrz niżej). Bez restartu stare hasła działają dalej.
+
+Polecenie wypisuje token agenta **tylko raz**. Zapisz go, bo trafi do skryptu Windows (część 7).
+
+Przydatne warianty (dopisz je na końcu polecenia zamiast samego `--write`):
+
+| Cel | Opcje |
+|---|---|
+| zmiana tylko hasła edytora | `--only editor --write` |
+| zmiana tylko hasła przeglądającego | `--only viewer --write` |
+| nowy token agenta (stary przestaje działać) | `--only agent --write` |
+| wylogowanie wszystkich przeglądarek | `--logout-all --write` |
+| podgląd bez zapisu (wypisuje linie do `.env`) | bez `--write` |
+
+**Lokalnie** (do pracy na swoim komputerze; zapisuje do `apps/server/.env`):
+
+```powershell
+npm run hash-secret -- --write
+```
+
+### Pierwsze wdrożenie wersji z logowaniem
+
+Stara wersja na serwerze nie ma jeszcze polecenia `hash-secret`, więc kolejność jest taka:
+
+1. `npm run deploy`. Sprawdzenie stanu na końcu **zakończy się błędem**, bo `/api/health` zgłasza `"auth":{"configured":false}`. Tak ma być.
+2. Polecenie `hash-secret --write` na serwerze (wyżej).
+3. Restart aplikacji.
+4. https://sport.kula.opole.pl/api/health pokazuje `"status":"ok"`, a strona główna przekierowuje na logowanie.
+
+### Logowanie w przeglądarce
+
+- Hasło `lk` daje tryb **Przeglądanie**, hasło edytora daje tryb **Edycja**.
+- „Zapamiętaj w tej przeglądarce”:
+  - zaznaczone: logowanie przetrwa zamknięcie przeglądarki i jest ważne 90 dni od ostatniego użycia
+  - niezaznaczone: wygasa po zamknięciu przeglądarki, najpóźniej po 96 godzinach bez używania.
+- Plakietka roli w nagłówku otwiera menu z przełączaniem roli i wylogowaniem. Przejście do edycji wymaga hasła edytora, powrót do przeglądania już nie.
+- Po 10 błędnych hasłach z jednego adresu IP logowanie jest blokowane na 15 minut.
+
 ## Restart aplikacji
 
 - w panelu: **Node.js → aplikacje → Restart**, albo

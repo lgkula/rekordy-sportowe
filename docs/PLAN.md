@@ -178,11 +178,11 @@ This panel looks like the CloudLinux Node.js Selector, but that is not confirmed
   - viewer → editor asks for the editor password
   - editor → viewer happens without a password.
 - **"Zapamiętaj w tej przeglądarce" checkbox**:
-  - checked → persistent cookie (90 days)
-  - unchecked → session cookie.
+  - checked → persistent cookie (90 days, sliding)
+  - unchecked → browser-session cookie, also expired by the server after 96 h of inactivity (sliding).
 - Other security measures:
   - cookies are httpOnly, `Secure`, `SameSite=Strict`, HMAC-signed, and carry role + expiry + `secretVersion` (bumping it logs everyone out)
-  - login rate limit (`@fastify/rate-limit`)
+  - login rate limit: failed passwords per IP counted in the DB (`auth_failures`), 10 per 15 min
   - all mutations are checked on the server for the `editor` role.
 
 ---
@@ -435,7 +435,8 @@ Each part is one Claude Code session with its own prompt in `docs/prompts/`. Par
 | Part | Status |
 |---|---|
 | 0 | **done** (2026-10-02): scaffold, CI/deploy scripts, docs; spike verified on the host; first `npm run deploy` OK and https://sport.kula.opole.pl/api/health returns `ok`. Pending: first commit/push to GitHub, then the first CI run and the GitHub Actions deploy secrets. |
-| 1–8 | not started |
+| 1 | **done** (2026-10-02): scrypt hashes + `hash-secret` CLI, signed stateless session cookie (96 h / 90 days, sliding), login/logout/me/switch, default role guards + agent bearer token, DB-backed failed-attempt limit, login page, role badge/switch/logout in the header, `useCanEdit()`. Pending: deploy, then `hash-secret --write` on the host + restart (WDROZENIE.md), and a check that `request.ip` is the real client IP behind LiteSpeed. |
+| 2–8 | not started |
 
 ### Decision log
 
@@ -452,6 +453,8 @@ Each part is one Claude Code session with its own prompt in `docs/prompts/`. Par
 | 2026-10-02 | Tooling versions: TypeScript **6.0** (typescript-eslint does not support TS 7 yet), Vite 8, Vitest 5, React 19, Mantine 9, React Router 8, Fastify 5, Zod 4, Drizzle ORM 0.45. Server bundle ~4.4 MB (unminified, with source maps; `app.js` enables `process.setSourceMapsEnabled`). |
 | 2026-10-02 | **Spike results** (app created in the panel: Node 22.23.2, Production, root `nodejsapp/rekordy-sportowe`, URL `sport.kula.opole.pl`, `app.js`):<br>• The web server is **LiteSpeed**; the Node runner is **`lsnode.js`**, which reads the Passenger directives from `.htaccess`. It overrides `listen()` (socket in `LSNODE_SOCKET`; `PORT` is not set). Fastify `listen({port})` works unchanged.<br>• cwd = app root; `NODE_ENV=production` from the panel; the app starts lazily on the first request.<br>• **Static files in `public_html` win over the app.** The Seohost placeholder `public_html/index.html` hid the app on `/`; renamed to `index.html.seohost-default`. Never put files into the subdomain's `public_html`.<br>• Restart: `cloudlinux-selector restart --json --interpreter nodejs --app-root nodejsapp/rekordy-sportowe` works (new pid).<br>• Logs: lsnode writes the app's **stderr** to `<app-root>/stderr.log`; stdout is discarded, so the Fastify logger writes to stderr. Rotation follows in Part 8.<br>• Request body: 60 MB uploads pass through LiteSpeed (no host limit below that).<br>• **Bot protection** on the host answers **429** to `curl`'s default User-Agent (Node `fetch` and custom UAs pass). Every HTTP client we write (deploy health check, Windows sync script) must send its own User-Agent. |
 | 2026-10-02 | Production DB `srv34629_rekordy` (MariaDB 11.4). `.env` values with special characters must be quoted: an unquoted `#` in `DB_PASSWORD` truncated it (Node `util.parseEnv`, dotenv semantics), so the first deploy got "Access denied". Fixed by single-quoting; documented in WDROZENIE.md and `.env.example`. |
+| 2026-10-02 | **Part 1 (auth):** session lifetime **96 h** without "remember" (browser-session cookie) and **90 days** with it, both **sliding** (cookie re-issued when older than 1 h). The viewer password is changed only via `.env` + `hash-secret` (no UI). Rate limit = own limiter in MariaDB (`auth_failures`, 10 failures / 15 min per IP, fixed window), counting **only failed** passwords/tokens and **not reset** by a success (so the known viewer password cannot be used to reset the counter); `@fastify/rate-limit` not used (its in-memory store is not Passenger-safe). `hash-secret` is interactive with hidden input (`ssh -t` on the host), `--write` edits `.env` in place. |
+| 2026-10-02 | Auth implementation details: hashes `scrypt:N:r:p:salt:hash` (N=16384, r=8, p=1, Node `crypto.scrypt`); cookie `rs_session` = base64url JSON + HMAC-SHA256 (`SESSION_SECRET`), no server state. Default guards: matched `/api/*` routes need a session, non-GET need `editor`, `/api/agent/*` only the bearer token (cookies ignored there, token rejected elsewhere). Missing secrets: the app still starts (so `tools.cjs migrate` works), login answers 503 and `/api/health` 503 with `auth.configured: false`. `trustProxy` = trust only the immediate peer (Fastify 5 ignores a numeric hop count), so `request.ip` is the last X-Forwarded-For entry. Editor password ≥ 12 characters. |
 | 2026-10-02 | Display formats: pace `m:ss` (+ ` /km`); duration `m:ss` below 1 h and `h:mm:ss` from 1 h; distance with a Polish decimal comma, no thousands grouping. |
 
 ---
