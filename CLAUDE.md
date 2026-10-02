@@ -14,6 +14,9 @@ Implementation is split into parts; each has a prompt in [docs/prompts/](docs/pr
 
 ## Hosting rules (PLAN.md D7, section 3.2)
 
+- **Never delete anything on the hosting server without the user's double confirmation.** This covers files and directories (over SSH, scp/rsync with delete options, the panel), cron jobs, Node.js selector apps, subdomains, mail accounts and any other panel configuration. Double confirmation = (1) ask and get a "yes", then (2) list exactly what will be deleted (full paths / object names) and ask again, getting a second explicit "yes". A confirmation applies only to that one operation; no general or earlier approval counts. Exceptions:
+  - `scripts/deploy-remote.sh` removing its own temporary staging directory and the uploaded archive after a deploy (the deploy itself still needs the user's approval).
+  - The application's database: for now any operation is allowed (including `DROP`, `TRUNCATE`, `DELETE`, destructive migrations), until the user revokes this exception. Other databases on the account are not covered.
 - Seohost shared hosting, DirectAdmin + **CloudLinux Node.js Selector**, **Node.js 22**, MariaDB 11.4. SSH alias `seohost`.
 - **The Node process is started/restarted only by the panel's Node.js selector** (panel UI, or `cloudlinux-selector restart` in the deploy script). Never start or keep the server alive by hand (`node server.js &`, pm2, nohup, forever).
 - SSH is fine for everything else: migrations, maintenance CLI (`node dist/tools.cjs <command>`), cron.
