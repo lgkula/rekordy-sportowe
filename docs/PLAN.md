@@ -435,7 +435,7 @@ Each part is one Claude Code session with its own prompt in `docs/prompts/`. Par
 | Part | Status |
 |---|---|
 | 0 | **done** (2026-10-02): scaffold, CI/deploy scripts, docs; spike verified on the host; first `npm run deploy` OK and https://sport.kula.opole.pl/api/health returns `ok`. Pending: first commit/push to GitHub, then the first CI run and the GitHub Actions deploy secrets. |
-| 1 | **done** (2026-10-02): scrypt hashes + `hash-secret` CLI, signed stateless session cookie (96 h / 90 days, sliding), login/logout/me/switch, default role guards + agent bearer token, DB-backed failed-attempt limit, login page, role badge/switch/logout in the header, `useCanEdit()`. Pending: deploy, then `hash-secret --write` on the host + restart (WDROZENIE.md), and a check that `request.ip` is the real client IP behind LiteSpeed. |
+| 1 | **done** (2026-10-02): scrypt hashes + `hash-secret` CLI, signed stateless session cookie (96 h / 90 days, sliding), login/logout/me/switch, default role guards + agent bearer token, DB-backed failed-attempt limit, login page, role badge/switch/logout in the header, `useCanEdit()`. Deployed (`c694de3`), secrets set on the host, `/api/health` ok; verified in production: `request.ip` is the real client IP behind LiteSpeed (a forged `X-Forwarded-For` is ignored), cookie flags `HttpOnly; Secure; SameSite=Strict`. |
 | 2–8 | not started |
 
 ### Decision log
