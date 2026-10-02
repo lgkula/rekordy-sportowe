@@ -1,0 +1,15 @@
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    // The API runs on the Fastify dev server (npm run dev in apps/server).
+    proxy: { '/api': 'http://127.0.0.1:3000' },
+  },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+  },
+});

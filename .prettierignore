@@ -1,0 +1,9 @@
+node_modules
+dist
+deploy
+storage
+coverage
+package-lock.json
+apps/server/drizzle/meta
+prompt.md
+docs

@@ -1,0 +1,38 @@
+import { drizzle, type MySql2Database } from 'drizzle-orm/mysql2';
+import mysql from 'mysql2/promise';
+import type { Config } from '../config';
+import * as schema from './schema';
+
+export type Db = MySql2Database<typeof schema>;
+
+export type Database = {
+  db: Db;
+  pool: mysql.Pool;
+  close: () => Promise<void>;
+};
+
+export function connectionOptions(config: Config): mysql.ConnectionOptions {
+  return {
+    host: config.db.host,
+    port: config.db.port,
+    user: config.db.user,
+    password: config.db.password,
+    database: config.db.database,
+    timezone: 'Z',
+    charset: 'utf8mb4_unicode_ci',
+    connectTimeout: 5000,
+  };
+}
+
+/** Creates a lazy connection pool; no connection is opened until the first query. */
+export function createDatabase(config: Config): Database {
+  const pool = mysql.createPool({
+    ...connectionOptions(config),
+    connectionLimit: 5,
+    maxIdle: 2,
+    idleTimeout: 60_000,
+    enableKeepAlive: true,
+  });
+  const db = drizzle(pool, { schema, mode: 'default' });
+  return { db, pool, close: () => pool.end() };
+}

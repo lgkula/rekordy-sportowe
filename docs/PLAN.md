@@ -1,0 +1,525 @@
+# Sports Records Web App — Implementation Plan
+
+> Working name: **rekordy-sportowe**
+> Plan language: English. The Polish summary is in the last section ([Podsumowanie po polsku](#podsumowanie-po-polsku)).
+> Implementation prompts for every part: [docs/prompts/](prompts/README.md).
+
+---
+
+## 1. Goals and scope
+
+A personal web app that shows one athlete's sports records. It does four things:
+
+1. Shows **personal records** (top 3 results per distance) separately for each sport.
+2. Shows a **list of races (competitions)**. Editions of the same race are grouped into one event.
+3. Manages the **list of activities** they come from: CRUD, hidden mode, duplicate detection.
+4. Brings data in from **manual entry**, **FIT files**, **bulk exports (Strava / Garmin Connect)** and a **Windows script** that syncs FIT files from a Garmin watch (Fenix 7X Sapphire Solar, firmware 27.18, **MTP** connection).
+
+Sports:
+
+| Code (in code) | UI label (PL) | Status |
+|---|---|---|
+| `road_run` | Biegi | MVP |
+| `trail_run` | Biegi przełajowe | MVP (also tracks elevation gain) |
+| `xc_ski` | Narciarstwo biegowe | Future. The data model supports it from day one; hidden in the UI. |
+
+Record distances for `road_run` and `trail_run`: **1 km, 5 km, 10 km, half marathon (21.0975 km)**. The list of distances is configuration, not hard-coded logic.
+
+---
+
+## 2. Confirmed decisions
+
+| # | Decision | Source |
+|---|---|---|
+| D1 | Hosting: shared hosting with **Node.js + MySQL** (and PHP). **No Docker**, no Fly.io/Render. | user |
+| D2 | Records are **always ranked by pace**. Results that qualify only through the distance tolerance **do not show time**, only pace. A tooltip shows the actual distance. | user |
+| D3 | Watch: Garmin **Fenix 7X Sapphire Solar**, fw 27.18. It connects over **MTP** (no drive letter), so the Windows script must use MTP. | user |
+| D4 | UI language: **Polish only**. Strings live in one module, so i18n can be added later. | user |
+| D5 | Code, identifiers, comments, commits and docs: English. Communication with the user, including clarifying questions: **Polish**. | prompt.md |
+| D6 | When in doubt during planning or implementation, **ask the user** (in Polish) before deciding. | prompt.md |
+| D7 | Hosting: **Seohost**, **Node.js v22.23.2**, **SSH/terminal available**. The Node.js app **process is started and restarted only by the panel's Node.js app manager (Passenger)**, never as a self-managed process. Everything else (npm, migrations, scripts, cron) may run over SSH. See 3.2. | user |
+
+---
+
+## 3. Technology stack
+
+The main constraint is a shared host that runs Node.js without Docker. The server bundle must be light: **no native Node modules**, few runtime dependencies. The process is started by the panel's Node.js app manager under Passenger (D7). Target runtime: **Node.js 22**.
+
+### 3.1 Overview
+
+| Layer | Choice | Why |
+|---|---|---|
+| Language | **TypeScript** everywhere | One language for front, back, shared parsing code and tests. |
+| Repo | **npm workspaces** monorepo: `apps/web`, `apps/server`, `packages/core` | `packages/core` holds the domain logic (FIT parsing, records engine, pace math). It runs in both the browser and Node. |
+| Frontend | **React + Vite**, **React Router**, **TanStack Query** | Static SPA build, served by the Node server. No SSR needed. |
+| UI kit | **Mantine** (+ `@mantine/dates`, `@mantine/dropzone`, `@mantine/charts`), **dnd-kit** for manual ordering | Ready-made tables, forms, tooltips, modals, dropzone and a Polish date locale (dayjs `pl`). |
+| Backend | **Fastify** + **Zod** (via `fastify-type-provider-zod`) | Fast, small and typed. The same Zod schemas validate forms on the frontend. |
+| DB | **MySQL / MariaDB** (from hosting) + **Drizzle ORM** + `drizzle-kit` migrations, driver `mysql2` (pure JS) | Light, no binary engine (unlike Prisma), SQL-first, typed. |
+| FIT parsing | **`@garmin/fitsdk`** (official Garmin JavaScript SDK) | Runs in the browser and in Node. Reads `file_id`, `session`, `lap`, `record`, `sport` messages. |
+| GPX/TCX (bulk only) | `fast-xml-parser` | Strava exports contain GPX/TCX for some activities. |
+| ZIP / GZ in browser | **fflate** | Unpacks multi-GB bulk exports in the browser with streaming. Nothing large is uploaded to the host. |
+| Auth | Signed httpOnly cookie (HMAC, `@fastify/cookie`), password hashing with built-in **`crypto.scrypt`** | No native deps (no bcrypt/argon2 binaries). |
+| Build / bundle | Vite (web), **tsup/esbuild** (server bundled with **all dependencies inlined** into `dist/server.cjs`) | No `node_modules` / `npm install` on the host (this avoids the panel's virtual-env `node_modules` symlink). Passenger only needs the startup file `app.js`. |
+| Tests | **Vitest** (unit and integration), **Playwright** (a few e2e smoke tests) | |
+| Lint / format | ESLint + Prettier | |
+| Windows sync | **PowerShell 5.1** (built into Windows 10) + `Shell.Application` COM for MTP + `curl.exe` for multipart upload + Task Scheduler | Nothing to install on the user's PC. |
+
+### 3.2 Hosting and deployment model
+
+**Hosting: Seohost** (shared). **SSH/terminal is available**, so npm, builds, migrations and maintenance scripts can be run over SSH. The only restriction is that **the Node.js app process cannot be started or kept alive by hand** (no `node server.js &`, no pm2/forever/nohup). The panel's **Node.js application manager** starts it (D7). It runs the app under **Phusion Passenger**.
+
+Panel "Utwórz aplikację" form (from the user's screenshot) and the values we plan to use:
+
+| Panel field | Value |
+|---|---|
+| Wersja Node.js | **22.x** (the host offers v22.23.2; the panel's default 10.24.1 must be changed) |
+| Tryb aplikacji | **Production** (sets `NODE_ENV=production`) |
+| Katalog główny aplikacji | app root **outside `public_html`**, e.g. `~/apps/rekordy-sportowe` (to confirm in part 0) |
+| URL aplikacji | the chosen domain/subdomain (+ optional path) |
+| Plik startowy aplikacji | **`app.js`** (CommonJS) |
+| Environment variables | `NODE_ENV` comes from the mode. Other config lives in `.env`, see below. |
+
+This panel looks like the CloudLinux Node.js Selector, but that is not confirmed. Verify in part 0. Consequences for the implementation:
+
+- **Passenger integration**
+  - The startup file `app.js` is loaded by Passenger. Keep it **CommonJS** (Passenger's ESM support differs between versions); it just `require`s `dist/server.cjs`.
+  - The server calls `fastify.listen({ port: Number(process.env.PORT) || 3000 })`. Passenger takes over `listen()`, so the port is never hard-coded. Part 0 verifies this with a minimal spike before building on it.
+- **Process lifecycle under Passenger**
+  - The app may start lazily on the first request, be stopped after idle time, or run in more than one process.
+  - So nothing important lives only in memory: no in-process cron or timers for critical work, and sessions are stateless cookies.
+  - Long jobs (recompute-all) are chunked and resumable.
+  - Expect a cold start after idle.
+- **Restart**:
+  - the "Restart" button in the panel, or
+  - over SSH: `touch <app-root>/tmp/restart.txt` (standard Passenger), or the selector's CLI if the host provides it (e.g. `cloudlinux-selector restart --json --interpreter nodejs --app-root <app-root>`).
+  - Part 0 checks which one works on Seohost. The deploy script uses it.
+- **Dependencies**: in CloudLinux-style selectors, `node_modules` in the app root is a symlink into a virtual environment managed by the panel. `npm install` must then be run with the panel's "Run NPM Install" button, or over SSH after activating that environment (the command is shown in the panel). To avoid this, **the server is bundled with esbuild/tsup into one `dist/server.cjs` with all dependencies inlined**, so the host needs no `node_modules` at all. No native modules.
+- **Build locally** (or in CI), not on the host. Shared-hosting resource limits (memory/processes) make builds on the server unreliable.
+- **Deploy script** (`npm run deploy`, run locally):
+  1. build + package
+  2. `rsync` over SSH into the app root (keep `.env` and `storage/` untouched)
+  3. run migrations over SSH: `node dist/migrate.cjs` (uses the host's Node 22 binary; path confirmed in part 0)
+  4. restart (touch `tmp/restart.txt` or the selector CLI)
+  5. check `GET /api/health`.
+- **Configuration**: secrets and DB credentials live in **`<app-root>/.env`** (chmod 600, outside the web root). Both the Passenger-started app and SSH scripts (migrations, maintenance) then read the same source. Panel env vars are used only for `NODE_ENV` (set by "Tryb aplikacji"). Values set in the panel override `.env`.
+- **Migrations**:
+  - run explicitly by the deploy script over SSH
+  - at startup the app checks the schema version; if migrations are pending it logs an error and `/api/health` reports it (no automatic migration inside Passenger workers).
+- **Maintenance**:
+  - CLI tasks in `dist/tools.cjs`, run over SSH, e.g. `hash-secret`, `recompute-all`, `backup`, `restore`
+  - the tasks useful day to day also get buttons on an editor-only "Administracja" page (recompute all, status).
+- **Scheduled tasks** (backups): the panel's cron (to confirm), running `node dist/tools.cjs backup` (or `mysqldump` if available).
+- **Logs**: Passenger/stderr logs where the panel exposes them, plus the app's own rotated log file in `storage/logs/`.
+- Uploaded raw FIT files go to `storage/fit/<yyyy>/<sha256>.fit.gz`, outside the public web root. They are kept so records can be recomputed if the rules change. The `storage/` path must be writable by the app process (checked at startup; `/api/health` reports it).
+
+---
+
+## 4. Domain rules
+
+### 4.1 Distances and tolerance
+
+- Targets: `1k = 1000 m`, `5k = 5000 m`, `10k = 10000 m`, `hm = 21097.5 m`.
+- **Tolerance applies only to targets > 1 km**: an activity qualifies for target `T` when `distance ≥ 0.9 × T` (e.g. 4.6 km counts for 5 km). For 1 km the full distance is required.
+- A result from an activity with `0.9·T ≤ distance < T` is a **tolerance result**:
+  - `pace = duration / actual_distance`
+  - it is marked visually (an icon or asterisk)
+  - the **time is not shown** (D2)
+  - a tooltip shows the actual distance (e.g. "Dystans: 4,60 km").
+- Longer activities: for every target `T ≤ distance`, the **fastest contiguous segment** of exactly `T` metres is computed from the stream (two-pointer sliding window over `(timer_time, distance)` samples, with linear interpolation at the edges). Example: a 10 km run can set a 5 km and a 1 km record.
+- An activity with `0.9·T ≤ distance < T` for one target can still give full results for smaller targets. Example: a 9.3 km run gives a 10 km tolerance result plus full 5 km and 1 km results.
+
+### 4.2 Records (the "top 3")
+
+- Records are shown **per sport, per distance**. Only distances with at least one result are displayed.
+- Each distance shows the **3 best results of all time**, ranked by **pace** (ascending). The three together make up "the record".
+- Each result shows **pace (min/km)** and **time** (except tolerance results). It links to the activity URL (Garmin Connect / Strava) when one was provided.
+- Results from **hidden activities** are excluded.
+- **One activity gives at most one result per distance** (default, see open question Q3).
+- Results live in a **`efforts`** table (materialised best efforts). They are:
+  - computed automatically on import or edit
+  - **editable** (time / distance / link) and **deletable** (soft delete, so recomputation does not bring them back); the next result moves up automatically
+  - entered directly in **simplified manual entry** ("record on a chosen distance").
+
+### 4.3 Races and events
+
+- An activity can be flagged **`is_race`**. The flag comes from the FIT file when possible (see 6.2), is set manually otherwise, and can always be edited.
+- A race activity can belong to an **event** (e.g. "Bieg Niepodległości") with an optional **edition label** (e.g. "jesień", "2024"). On import the app suggests an existing event by name similarity; the user confirms or creates a new one.
+- Event list (per sport):
+  - event name
+  - distance (the most common edition distance, editable)
+  - **best pace across all editions**
+  - for `trail_run`, also **elevation gain** (from the best edition, see open question Q6)
+  - ordering: **manual (drag & drop, editor only)** or **by name**. The ordering mode is saved as a setting.
+- Clicking an event expands its editions: edition label, date, pace.
+- Clicking an edition shows **per-km splits** (table plus a small bar chart) and the **notes**.
+
+### 4.4 Activities
+
+- List per sport (or all), sortable by **name** and **distance** (and by date as default).
+- Edit and delete. A **hidden** toggle excludes the activity from records (it stays in the activity list, greyed out).
+- **Duplicate detection**, from strongest to weakest signal:
+  1. same FIT `file_id` (`serial_number` + `time_created`) → `external_id = garmin:<serial>:<time_created>`
+  2. same original **file name**
+  3. same file **SHA-256**
+  4. same external ID from Strava (`strava:<activity_id>`)
+  5. **fuzzy cross-source match**: start time within ±2 min and distance within ±3%. This is shown as a warning and the user decides.
+- Signals 1–4 block the import (the item is shown as "duplicate"). Signal 5 needs confirmation.
+
+### 4.5 Access and roles
+
+| Role | How | Rights |
+|---|---|---|
+| `viewer` | Fixed password **`lk`** (configurable, stored as a hash) | Read only |
+| `editor` | Strong password (hash in `.env`) | Full CRUD, imports |
+| `agent` | Bearer API token (hash in `.env`) | Only `POST /api/agent/fit` (upload to the import inbox) |
+
+- A single login form: the password decides the role.
+- **Role switch** in the header:
+  - viewer → editor asks for the editor password
+  - editor → viewer happens without a password.
+- **"Zapamiętaj w tej przeglądarce" checkbox**:
+  - checked → persistent cookie (90 days)
+  - unchecked → session cookie.
+- Other security measures:
+  - cookies are httpOnly, `Secure`, `SameSite=Strict`, HMAC-signed, and carry role + expiry + `secretVersion` (bumping it logs everyone out)
+  - login rate limit (`@fastify/rate-limit`)
+  - all mutations are checked on the server for the `editor` role.
+
+---
+
+## 5. Data model (MySQL, Drizzle)
+
+```
+activities
+  id                PK
+  sport             ENUM('road_run','trail_run','xc_ski')
+  name              VARCHAR
+  start_time_utc    DATETIME
+  local_date        DATE               -- for display/grouping
+  distance_m        DECIMAL(9,1)
+  duration_s        DECIMAL(9,1)       -- timer time (auto-pause excluded), see Q2
+  elapsed_s         DECIMAL(9,1) NULL
+  elevation_gain_m  INT NULL
+  is_race           BOOL
+  is_hidden         BOOL
+  event_id          FK events NULL
+  edition_label     VARCHAR NULL
+  notes             TEXT NULL
+  activity_url      VARCHAR NULL       -- Garmin Connect / Strava link
+  source            ENUM('manual','manual_simple','fit','strava_export','garmin_export','agent')
+  external_id       VARCHAR NULL UNIQUE
+  file_name         VARCHAR NULL UNIQUE
+  file_sha256       CHAR(64) NULL UNIQUE
+  splits            JSON NULL          -- [{km, distance_m, duration_s, elevation_gain_m}]
+  has_stream        BOOL
+  created_at / updated_at
+
+activity_streams
+  activity_id       PK/FK
+  data              MEDIUMBLOB         -- gzip JSON {t:[timer s], d:[m], alt:[m]} (1 Hz)
+
+efforts
+  id                PK
+  activity_id       FK
+  sport             ENUM (denormalised for fast queries)
+  distance_key      VARCHAR ('1k','5k','10k','hm')
+  target_m          DECIMAL
+  actual_distance_m DECIMAL
+  duration_s        DECIMAL
+  pace_s_per_km     DECIMAL
+  is_tolerance      BOOL
+  origin            ENUM('computed','manual')
+  is_edited         BOOL               -- manual override → recomputation must not overwrite
+  is_deleted        BOOL               -- soft delete
+  UNIQUE(activity_id, distance_key)
+
+events
+  id, sport, name, display_distance_m NULL, sort_order INT, created_at
+
+import_items                           -- review queue for FIT/bulk/agent imports
+  id, batch_id, source, file_name, file_sha256, external_id,
+  status ENUM('pending','approved','rejected','duplicate','error'),
+  parsed JSON                          -- normalised activity preview
+  duplicate_of_activity_id NULL, error TEXT NULL, created_at
+
+import_batches
+  id, source, auto_approve BOOL, created_at, summary JSON
+
+settings
+  key PK, value JSON                   -- e.g. events.ordering = 'manual' | 'name'
+```
+
+---
+
+## 6. Import pipelines
+
+All pipelines produce the same **`NormalizedActivity`** (defined in `packages/core`):
+
+```ts
+{ sport, name, startTimeUtc, distanceM, durationS, elapsedS?, elevationGainM?,
+  isRace, isRaceConfidence: 'fit' | 'heuristic' | 'none',
+  externalId?, fileName?, fileSha256?, activityUrl?,
+  stream?: { t: number[]; d: number[]; alt?: number[] },
+  splits?: Split[] }
+```
+
+`packages/core` then computes the efforts. The server re-validates and recomputes on save. The client result is only a preview.
+
+### 6.1 Manual entry
+
+- **Full form**: every activity field. Optional manual splits. Race flag, event and edition label, notes, URL.
+- **Simplified form** (toggle) with only:
+  - name
+  - distance
+  - date
+  - **record on a chosen distance** (distance key + time; pace is computed)
+  - Garmin Connect / Strava link.
+
+  It creates an activity with `source = manual_simple` and one `manual` effort.
+
+### 6.2 FIT import (web)
+
+- A multi-file dropzone (`.fit`). Files are parsed **in the browser** with `packages/core`, so the preview is instant. After approval the raw files are sent to the server, which re-parses them and stores them.
+- Duplicate check before preview: `POST /api/import/check` with `{fileName, sha256, externalId}` for all files.
+- **A review step for every file**:
+  - summary, detected sport, detected race flag, computed efforts and splits
+  - the user can edit the name, sport, race flag, event and URL
+  - actions: approve / skip.
+- **Race detection from FIT** (to verify on the user's real files, see open question Q1). Candidates:
+  - the `sport` message `name` (activity profile name, e.g. a dedicated "Race"/"Zawody" profile)
+  - `session`/`activity` event fields
+  - workout or course names
+  - Race-calendar-related fields on newer firmware.
+
+  If nothing reliable is found: a heuristic plus a manual checkbox.
+- Sport detection: `sport=running` + `sub_sport=trail` → `trail_run`; `sub_sport=street/generic/track` → `road_run`; the user can override.
+
+### 6.3 Bulk import (Strava / Garmin Connect export)
+
+- The user selects the export **ZIP**. It is unpacked and parsed **in the browser** (fflate + Web Worker), so only normalised data (+ small gzipped streams) is uploaded, in batches.
+- **Strava export**:
+  - `activities.csv` (ID, name, type, date, distance, elapsed/moving time, filename, …)
+  - `activities/*.fit.gz | *.gpx(.gz) | *.tcx(.gz)`
+  - only running types are imported
+  - `externalId = strava:<id>`
+  - URL `https://www.strava.com/activities/<id>`.
+- **Garmin Connect export**:
+  - `DI_CONNECT/DI-Connect-Fitness/*summarizedActivities*.json` (metadata; may contain event type = race)
+  - `DI_CONNECT/DI-Connect-Uploaded-Files/*.zip` (original FIT files)
+  - URL `https://connect.garmin.com/modern/activity/<activityId>`
+  - the exact structure must be verified on a real export (open question Q4).
+- A **mode switch**:
+  - *manual review* goes item by item (same review UI as FIT import)
+  - *automatic* approves all non-duplicates and puts fuzzy-duplicate warnings in the queue.
+- Progress bar, cancel and resume. Resume works because the server remembers the `import_items` already sent.
+
+### 6.4 Windows sync agent
+
+- `tools/windows-sync/`:
+  - `Sync-GarminFit.ps1` (watcher + uploader)
+  - `Install.ps1` (registers a Task Scheduler task at logon, stores config)
+  - `config.example.json`
+  - `README.md` (Polish).
+- Detection: the task starts at logon. It waits for device arrival (`Register-CimIndicationEvent` on `Win32_DeviceChangeEvent`, with a 30 s polling fallback), then looks for the MTP device named like `fenix 7X*` under `Shell.Application` → *This PC*.
+- Reading: `<device>\Internal Storage\GARMIN\Activity\*.fit`, copied through `Shell.Application` `CopyHere`. The copy is asynchronous, so the script waits until the file size is stable. Files go to a local staging folder.
+- A local state file (`state.json`) lists names and hashes already uploaded. Only new files are uploaded.
+- Upload: `curl.exe -A "RekordySync/<version>" -F file=@... -H "Authorization: Bearer <token>" https://<host>/api/agent/fit`. The server deduplicates too. **A custom User-Agent is mandatory**: the host's bot protection answers 429 to curl's default UA.
+- Server side: the file goes to the **import inbox** (`import_items`, status `pending`), where the editor approves it in the UI. An **auto-approve setting** exists (open question Q5).
+- The token is stored encrypted with Windows DPAPI (`ConvertFrom-SecureString`). Logs go to `%LOCALAPPDATA%\RekordySync\sync.log`. An optional toast notification reports "Wysłano N nowych aktywności".
+
+---
+
+## 7. API (summary)
+
+```
+POST   /api/auth/login            {password, remember}          → sets cookie, returns role
+POST   /api/auth/logout
+POST   /api/auth/switch           {targetRole, password?}
+GET    /api/auth/me
+
+GET    /api/records?sport=
+PATCH  /api/efforts/:id           (editor)
+DELETE /api/efforts/:id           (editor, soft)
+
+GET    /api/activities?sport=&sort=name|distance|date&dir=
+GET    /api/activities/:id        (with splits, notes)
+POST   /api/activities            (editor, full or simple)
+PATCH  /api/activities/:id        (editor; includes is_hidden)
+DELETE /api/activities/:id        (editor)
+
+GET    /api/events?sport=         (with aggregated best pace, distance, elevation)
+GET    /api/events/:id            (editions)
+POST   /api/events | PATCH /api/events/:id | DELETE /api/events/:id   (editor)
+PUT    /api/events/order          (editor) {sport, ids[]}
+GET/PUT /api/settings/:key
+
+POST   /api/import/check          (editor) duplicate check
+POST   /api/import/fit            (editor) multipart, approved files
+POST   /api/import/bulk/batch     (editor) normalised activities batch
+GET    /api/import/inbox          (editor)
+POST   /api/import/inbox/:id/approve | /reject   (editor)
+
+POST   /api/agent/fit             (agent token) multipart
+
+GET    /api/admin/status          (editor) version, pending migrations, DB, storage writability
+POST   /api/admin/recompute-all   (editor) chunked, resumable job
+GET    /api/admin/jobs/:id        (editor) job progress
+```
+
+The same maintenance tasks also exist as SSH CLI commands in `dist/tools.cjs` (`migrate`, `recompute-all`, `backup`, `restore`, `hash-secret`).
+
+---
+
+## 8. UI (Polish labels)
+
+| Route | View | Notes |
+|---|---|---|
+| `/login` | Login | Password field + "Zapamiętaj w tej przeglądarce" |
+| `/records` | **Rekordy życiowe** | Tabs per sport. Cards per distance, each with a top-3 table (miejsce, tempo, czas, data, nazwa, link). Tolerance marker + tooltip. Editor: edit/delete per row. |
+| `/races` | **Zawody** | Tabs per sport. Sort toggle (Ręcznie / Nazwa). Accordion of events → editions → splits + notes. Drag handles in editor + manual mode. |
+| `/activities` | **Aktywności** | Sortable table, hidden toggle, edit/delete, "Dodaj" button. |
+| `/activities/new`, `/activities/:id/edit` | Formularz | Full / Uproszczony toggle |
+| `/import` | **Import** | Tabs: Pliki FIT, Eksport zbiorczy, Skrzynka (agent inbox) |
+
+The header shows the current role and a role switch. Editor-only controls are hidden for viewers.
+
+Formatting helpers: pace `m:ss /km`, time `h:mm:ss`, distance `21,10 km` (Polish decimal comma), dates `dd.MM.yyyy`.
+
+---
+
+## 9. Implementation parts
+
+Each part is one Claude Code session with its own prompt in `docs/prompts/`. Parts are ordered by dependency. Each ends with working, tested and deployable software.
+
+| # | Part | Depends on | Key deliverables |
+|---|---|---|---|
+| 0 | **Scaffold & deployment skeleton** | – | A Passenger "hello" spike first. Then: monorepo, Fastify serving the SPA, MySQL connection + Drizzle, self-contained server bundle, CLAUDE.md, deploy script (rsync + migrations + restart over SSH), a Seohost panel setup guide, the app live on the host (started from the panel). **This validates the hosting first.** |
+| 1 | **Auth & roles** | 0 | Login, viewer/editor/agent, role switch, remember-me, route guards, rate limit |
+| 2 | **Data model, activities & manual entry** | 1 | Full schema + migrations, activities CRUD + list view, full & simplified forms, hidden mode, duplicate detection (fuzzy + external IDs) |
+| 3 | **FIT parsing & FIT import** | 2 | `packages/core` FIT → NormalizedActivity (stream, splits, sport, race flag), multi-file import with per-file review, raw file storage |
+| 4 | **Records engine & records view** | 3 | Best-effort algorithm with tolerance, `efforts` recomputation, records API + view with tooltips, edit/delete of results |
+| 5 | **Races / events view** | 4 | Events CRUD, edition assignment (with suggestions), aggregated list, manual ordering, splits + notes detail |
+| 6 | **Bulk import (Strava / Garmin Connect)** | 3, 4 | Browser-side ZIP processing, Strava and Garmin parsers (FIT/GPX/TCX), batch upload, manual/auto approval |
+| 7 | **Windows sync agent** | 3 | Agent endpoint + inbox UI, PowerShell MTP watcher + installer + Polish README |
+| 8 | **Hardening & release** | all | E2E smoke tests, backups (DB dump script), error pages, performance check, final deployment docs (Polish user guide) |
+
+---
+
+## 10. Open questions (to ask in Polish during the related part)
+
+| ID | Question | Part | Default if not answered |
+|---|---|---|---|
+| Q1 | How are races marked on the watch (a dedicated activity profile? Garmin race calendar?). Please provide 2–3 sample FIT files (race and non-race). | 3 | Heuristic + manual checkbox |
+| Q2 | Should records use **timer time** (auto-pause excluded) or **elapsed time**? | 3, 4 | Timer time |
+| Q3 | Can one activity give more than one result per distance (e.g. two 5 km segments of a 10 km run)? | 4 | No, one per activity per distance |
+| Q4 | Which exports are available (Strava, Garmin Connect, both)? Please provide sample exports (or a trimmed version). | 6 | Support both |
+| Q5 | Should files sent by the Windows script be approved manually (inbox) or automatically? | 7 | Inbox (manual) with an auto-approve setting |
+| Q6 | For the trail-running event list: which elevation gain to show (best edition's, latest edition's, or average)? | 5 | From the edition with the best pace |
+| Q7 | Remaining Seohost details: app root path, domain/subdomain for the app, the Node 22 binary path over SSH (or the env activation command shown by the panel), whether `tmp/restart.txt` or a selector CLI restarts the app, where Passenger logs are visible, cron availability, MySQL vs MariaDB version. Known already: SSH available, Node v22.23.2, panel form fields (screenshot). | 0 | Ask. Blocks deployment. |
+| Q8 | For manually entered activities without a stream that are longer than a target (e.g. 5.3 km with total time only): count them for 5 km using average pace, or not? | 2, 4 | Count them if `distance ≤ 1.05·T`, using average pace (time scaled to T); otherwise do not |
+| Q9 | Should the event distance shown in the list be editable, or always computed from editions? | 5 | Computed, with manual override |
+
+---
+
+## 11. Quality and conventions
+
+- TypeScript `strict`. Shared Zod schemas live in `packages/core`.
+- `packages/core` must have **high unit-test coverage**: pace math, best-effort sliding window, tolerance rules, FIT normalisation (fixtures from the user's real files, anonymised if needed).
+- Each API route gets an integration test (Vitest + a test MySQL database, or MySQL started locally without Docker, e.g. an XAMPP/MariaDB install; to be agreed in part 0).
+- UI strings live in `apps/web/src/i18n/pl.ts`.
+- Commit messages follow Conventional Commits.
+- Each part ends by updating the **Status** table below and the **Decision log**.
+
+### Status
+
+| Part | Status |
+|---|---|
+| 0 | **done** (2026-10-02): scaffold, CI/deploy scripts, docs; spike verified on the host; first `npm run deploy` OK and https://sport.kula.opole.pl/api/health returns `ok`. Pending: first commit/push to GitHub, then the first CI run and the GitHub Actions deploy secrets. |
+| 1–8 | not started |
+
+### Decision log
+
+| Date | Decision |
+|---|---|
+| 2026-09-30 | Plan created. Decisions D1–D6. |
+| 2026-09-30 | D7 corrected: Seohost, SSH available, Node 22.23.2. Only the app process is started/restarted from the panel (Passenger). Self-contained bundle, deploy over SSH (rsync + migrations + restart), config in `.env`, maintenance CLI over SSH + selected admin buttons. |
+| 2026-10-02 | Hosting verified over SSH. DirectAdmin + **CloudLinux Node.js Selector** confirmed (`cloudlinux-selector` CLI available, supports `restart`). Node 22 binary `/opt/alt/alt-nodejs22/root/usr/bin/node` (not on PATH). MariaDB **11.4** on the host. `rsync`, `tar`, `mysqldump` and cron are available. Existing apps live in `~/nodejsapp/<name>`. |
+| 2026-10-02 | App root `~/nodejsapp/rekordy-sportowe` (selector app root `nodejsapp/rekordy-sportowe`), URL https://sport.kula.opole.pl (subdomain already exists). |
+| 2026-10-02 | Local dev DB: XAMPP MariaDB **10.4.32** (`root`, no password; DBs `rekordy_sportowe`, `rekordy_sportowe_test`). Production is 11.4, so SQL must stay 10.4-compatible. CI uses a MariaDB 11.4 service container. |
+| 2026-10-02 | Repo: GitHub `lgkula/rekordy-sportowe` + GitHub Actions (CI on push/PR; Deploy manual via `workflow_dispatch` with a dedicated SSH deploy key). |
+| 2026-10-02 | Deploy transfer = `tar.gz` + `scp` + remote script over SSH (the local Windows machine has no `rsync`). Restart via `cloudlinux-selector restart` (panel mechanism), fallback `tmp/restart.txt`. Migrations run by the deploy script (`node dist/tools.cjs migrate`, MySQL `GET_LOCK`), never inside Passenger workers. `/api/health` returns 503 if migrations are pending. |
+| 2026-10-02 | The deployed `package.json` must not have `"type": "module"`: otherwise `app.js` (CommonJS) fails with "require is not defined in ES module scope" (found while testing the spike). |
+| 2026-10-02 | Tooling versions: TypeScript **6.0** (typescript-eslint does not support TS 7 yet), Vite 8, Vitest 5, React 19, Mantine 9, React Router 8, Fastify 5, Zod 4, Drizzle ORM 0.45. Server bundle ~4.4 MB (unminified, with source maps; `app.js` enables `process.setSourceMapsEnabled`). |
+| 2026-10-02 | **Spike results** (app created in the panel: Node 22.23.2, Production, root `nodejsapp/rekordy-sportowe`, URL `sport.kula.opole.pl`, `app.js`):<br>• The web server is **LiteSpeed**; the Node runner is **`lsnode.js`**, which reads the Passenger directives from `.htaccess`. It overrides `listen()` (socket in `LSNODE_SOCKET`; `PORT` is not set). Fastify `listen({port})` works unchanged.<br>• cwd = app root; `NODE_ENV=production` from the panel; the app starts lazily on the first request.<br>• **Static files in `public_html` win over the app.** The Seohost placeholder `public_html/index.html` hid the app on `/`; renamed to `index.html.seohost-default`. Never put files into the subdomain's `public_html`.<br>• Restart: `cloudlinux-selector restart --json --interpreter nodejs --app-root nodejsapp/rekordy-sportowe` works (new pid).<br>• Logs: lsnode writes the app's **stderr** to `<app-root>/stderr.log`; stdout is discarded, so the Fastify logger writes to stderr. Rotation follows in Part 8.<br>• Request body: 60 MB uploads pass through LiteSpeed (no host limit below that).<br>• **Bot protection** on the host answers **429** to `curl`'s default User-Agent (Node `fetch` and custom UAs pass). Every HTTP client we write (deploy health check, Windows sync script) must send its own User-Agent. |
+| 2026-10-02 | Production DB `srv34629_rekordy` (MariaDB 11.4). `.env` values with special characters must be quoted: an unquoted `#` in `DB_PASSWORD` truncated it (Node `util.parseEnv`, dotenv semantics), so the first deploy got "Access denied". Fixed by single-quoting; documented in WDROZENIE.md and `.env.example`. |
+| 2026-10-02 | Display formats: pace `m:ss` (+ ` /km`); duration `m:ss` below 1 h and `h:mm:ss` from 1 h; distance with a Polish decimal comma, no thousands grouping. |
+
+---
+
+## Podsumowanie po polsku
+
+**Co budujemy:** prywatną aplikację webową z rekordami sportowymi. Ma trzy widoki:
+
+- **Rekordy życiowe** — top 3 wyniki na każdym dystansie, osobno dla biegów i biegów przełajowych.
+- **Zawody** — kolejne edycje tego samego biegu zgrupowane w jedno wydarzenie, z tempami na kilometrach i notatkami.
+- **Aktywności** — edycja, usuwanie, tryb ukryty, wykrywanie duplikatów.
+
+Dane trafiają do aplikacji na cztery sposoby: ręczny formularz (pełny i uproszczony), import plików FIT, import eksportu zbiorczego ze Stravy / Garmin Connect oraz skrypt Windows, który po podłączeniu zegarka wysyła nowe pliki FIT.
+
+**Technologie** (dobrane pod hosting współdzielony z Node.js i MySQL, bez Dockera):
+
+- całość w **TypeScript**
+- frontend: **React + Vite + Mantine** (gotowe komponenty, tooltipy, drag & drop)
+- backend: **Fastify**
+- baza: **MySQL + Drizzle ORM** (lekki, bez natywnych modułów)
+- pliki FIT: oficjalny **Garmin FIT SDK** (JavaScript)
+- skrypt: **PowerShell** z obsługą **MTP**, bo Fenix 7X nie ma litery dysku.
+
+**Hosting Seohost:** Node.js 22, dostęp przez SSH. Proces aplikacji uruchamia wyłącznie panel (moduł Node.js działający przez Passenger). Dlatego:
+
+- w panelu tworzysz aplikację:
+  - wersja Node **22**, tryb **Production**
+  - katalog główny poza `public_html`
+  - plik startowy **`app.js`**
+- Passenger sam przejmuje port, więc aplikacja słucha na `process.env.PORT` i nie ma portu wpisanego na sztywno. Część 0 zaczyna od małej aplikacji testowej, żeby to potwierdzić.
+- serwer jest budowany lokalnie do jednego pliku ze wszystkimi bibliotekami w środku, więc na serwerze nie trzeba `npm install` ani `node_modules`
+- wdrożenie to jedna komenda na Twoim komputerze: budowanie → wysłanie przez `rsync`/SSH → migracje bazy przez SSH → restart aplikacji (`tmp/restart.txt` albo przycisk w panelu) → sprawdzenie `/api/health`
+- konfiguracja i hasła są w pliku `.env` w katalogu aplikacji, bo z niego korzystają zarówno aplikacja, jak i skrypty uruchamiane przez SSH
+- zadania serwisowe (przeliczenie rekordów, kopia zapasowa, hashe haseł) to polecenia uruchamiane przez SSH. Część z nich ma też przyciski na stronie „Administracja”.
+- Passenger może zatrzymać nieużywaną aplikację, więc nic ważnego nie może żyć tylko w pamięci procesu.
+
+Logika rekordów i parsowanie plików są we wspólnym pakiecie, który działa i w przeglądarce, i na serwerze. Dzięki temu duże eksporty zbiorcze są rozpakowywane w przeglądarce i nie obciążają hostingu.
+
+**Najważniejsze reguły:**
+
+- Ranking rekordów jest zawsze wg tempa.
+- Dla dystansów powyżej 1 km obowiązuje tolerancja 10% (np. 4,6 km liczy się jako 5 km). Taki wynik jest oznaczony, nie pokazuje czasu, a po najechaniu tooltip podaje faktyczny dystans.
+- Z dłuższej aktywności liczony jest najszybszy odcinek (np. 5 km w ramach 10 km).
+- Wyniki z ukrytych aktywności nie trafiają do rekordów.
+- Każdy wynik rekordu można edytować lub usunąć; wtedy na jego miejsce wskakuje następny.
+
+**Dostęp:**
+
+- Hasło `lk` daje rolę przeglądającego, silne hasło daje rolę edytora.
+- Rolę można przełączać.
+- Checkbox „zapamiętaj” zapisuje rolę w przeglądarce na 90 dni.
+- Skrypt Windows ma osobny token z uprawnieniem tylko do wysyłania plików.
+
+**Podział na 9 części** (każda z osobnym promptem w [docs/prompts/](prompts/README.md)):
+
+0. szkielet projektu i pierwsze wdrożenie na hosting (najpierw sprawdzamy, czy hosting działa)
+1. logowanie i role
+2. model danych, lista aktywności, formularze ręczne
+3. import plików FIT
+4. silnik rekordów i widok rekordów
+5. widok zawodów
+6. import zbiorczy Strava / Garmin
+7. skrypt Windows
+8. testy, kopie zapasowe, dokumentacja.
+
+**Otwarte pytania** (tabela w sekcji 10) zadam po polsku na początku odpowiedniej części. Najważniejsze:
+
+- jak oznaczasz zawody na zegarku (potrzebne przykładowe pliki FIT)
+- czas „timer” czy czas całkowity
+- czy pliki ze skryptu zatwierdzasz ręcznie
+- brakujące szczegóły Seohost: ścieżka katalogu aplikacji, domena lub subdomena, ścieżka do Node 22 przez SSH, sposób restartu, gdzie są logi, cron, wersja MySQL/MariaDB.

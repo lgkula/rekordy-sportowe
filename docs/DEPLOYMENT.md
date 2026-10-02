@@ -1,0 +1,78 @@
+# Deployment (technical)
+
+Polish step-by-step checklist for the owner: [WDROZENIE.md](WDROZENIE.md). Hosting decisions: [PLAN.md](PLAN.md) D7 / section 3.2.
+
+## Target environment
+
+| Item | Value |
+|---|---|
+| Hosting | Seohost shared hosting, DirectAdmin, CloudLinux Node.js Selector; web server **LiteSpeed**, Node runner `lsnode.js` (reads the Passenger directives the selector writes to `public_html/.htaccess`) |
+| Logs | app stderr → `<app-root>/stderr.log` (stdout is discarded; the server logs to stderr) |
+| Request size | ≥ 60 MB bodies pass through LiteSpeed (tested) |
+| Bot protection | 429 for curl's default User-Agent: always send a custom UA |
+| SSH | alias `seohost` (`~/.ssh/config`), home `/home/srv34629` |
+| Node.js | 22.23.2, binary `/opt/alt/alt-nodejs22/root/usr/bin/node` (not on `PATH` over SSH) |
+| App root | `~/nodejsapp/rekordy-sportowe` (selector app root `nodejsapp/rekordy-sportowe`) |
+| URL | https://sport.kula.opole.pl (app URI empty) |
+| Startup file | `app.js` (CommonJS) → `dist/server.cjs` |
+| Database | MariaDB 11.4 (local dev: XAMPP MariaDB 10.4; keep SQL 10.4-compatible) |
+| Server tools | `tar`, `gzip`, `rsync`, `mysqldump`, `cloudlinux-selector`, cron (DirectAdmin `direct_crons`) |
+
+**Process management:** only the Node.js selector starts/stops/restarts the app (panel UI or `cloudlinux-selector restart`). Never start the server by hand.
+
+## Artifact layout (`npm run package`)
+
+```
+deploy/rekordy-sportowe/
+  app.js              Passenger startup file (enables source maps, requires dist/server.cjs)
+  package.json        minimal: no "type" (CommonJS), no dependencies
+  build-info.json     version, commit, dirty flag, build time
+  .env.example
+  dist/server.cjs     Fastify server, all dependencies inlined (+ .map)
+  dist/tools.cjs      maintenance CLI (+ .map)
+  dist/web/           Vite build of the SPA
+  drizzle/            SQL migrations + journal
+deploy/rekordy-sportowe.tar.gz
+```
+
+On the host, the app root additionally contains `.env` (chmod 600), `storage/` and `stderr.log`. The deploy never touches them. The selector also creates `node_modules` (symlink into its virtualenv), `public/` and `tmp/`; the app does not use them.
+
+**Subdomain document root:** `~/domains/sport.kula.opole.pl/public_html` only holds the selector's `.htaccess` (+ Seohost error pages). LiteSpeed serves static files there **before** the app, so the Seohost placeholder `index.html` was renamed to `index.html.seohost-default`. Do not put other files there.
+
+## Deploy flow (`npm run deploy`)
+
+1. `scripts/package.mjs`: `npm run build` (web: `tsc` + Vite; server: tsup) → assemble the artifact → `tar -czf` (relative paths; GNU tar in Git Bash misreads drive letters).
+2. `scp` the archive to `~/tmp/rekordy-sportowe-deploy.tar.gz`. The local Windows machine has no `rsync`; the host does.
+3. `ssh seohost 'APP_ROOT=… NODE_BIN=… ARCHIVE=… bash -s' < scripts/deploy-remote.sh`:
+   - checks that the app root and `.env` exist (fails with a pointer to WDROZENIE.md otherwise)
+   - `rsync -a --delete` of `dist/` and `drizzle/`; copies `app.js`, `package.json`, `build-info.json`, `.env.example`
+   - `node dist/tools.cjs migrate`: Drizzle migrator on a dedicated connection, guarded by `GET_LOCK`
+   - `cloudlinux-selector restart --json --interpreter nodejs --app-root nodejsapp/rekordy-sportowe`, with fallback `touch tmp/restart.txt`.
+4. Polls `GET /api/health` for up to 90 s and requires HTTP 200 with `"status":"ok"`.
+
+Overrides via env: `DEPLOY_SSH_HOST`, `DEPLOY_APP_ROOT`, `DEPLOY_NODE_BIN`, `DEPLOY_URL`. `--skip-build` reuses an existing archive.
+
+**Rollback:** check out the previous commit and run `npm run deploy` again. Migrations are forward-only, so write additive migrations.
+
+## Configuration
+
+`<app-root>/.env` is read by both the Passenger-started server and SSH tools. Variables already present in the environment win (e.g. `NODE_ENV` from the panel's "Tryb aplikacji"). See `apps/server/.env.example` and `apps/server/src/config.ts`.
+
+## Migrations
+
+- Generate locally after schema changes: `npm run db:generate` (writes `apps/server/drizzle/`), commit the SQL.
+- Applied by the deploy script over SSH. Passenger workers never migrate.
+- At startup the server logs an error if migrations are pending, and `/api/health` returns 503 with `migrations.pending`.
+
+## Health endpoint
+
+`GET /api/health` → 200 `{status:"ok", version, node, uptimeS, db, migrations, storage}`, or 503 with `status:"degraded"` when the DB is unreachable, migrations are pending, or `storage/` is not writable.
+
+## CI/CD (GitHub Actions)
+
+- `.github/workflows/ci.yml` runs on push to `master` and on PRs: lint, format check, typecheck, tests (MariaDB 11.4 service container, so the integration tests run) and package.
+- `.github/workflows/deploy.yml` is manual (`workflow_dispatch`). It recreates the `seohost` SSH alias from the secrets `SSH_HOST`, `SSH_PORT`, `SSH_USER`, `SSH_PRIVATE_KEY` (dedicated deploy key) and `SSH_KNOWN_HOSTS`, then runs `npm run deploy`.
+
+## Passenger spike
+
+`spikes/passenger-hello/` is a minimal Fastify bundle used to validate the selector setup. Findings are recorded in the PLAN.md decision log.
