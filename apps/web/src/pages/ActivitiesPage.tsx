@@ -170,7 +170,14 @@ export function ActivitiesPage() {
               >
                 <Table.Td>
                   <Group gap={6} wrap="nowrap">
-                    <Text size="sm">{activity.name}</Text>
+                    <Anchor
+                      component={Link}
+                      to={`/activities/${activity.id}`}
+                      state={{ from: listUrl }}
+                      size="sm"
+                    >
+                      {activity.name}
+                    </Anchor>
                     {activity.activityUrl && (
                       <Anchor
                         href={activity.activityUrl}

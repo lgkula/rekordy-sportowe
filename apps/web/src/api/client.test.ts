@@ -41,6 +41,16 @@ describe('apiFetch', () => {
     expect(init.headers).not.toHaveProperty('content-type');
   });
 
+  it('sends FormData as is, letting the browser set the multipart type', async () => {
+    const fetch = mockFetch(json(201, { id: 1 }));
+    const form = new FormData();
+    form.append('meta', '{}');
+    await apiFetch('/api/import/fit', { method: 'POST', body: form });
+    const init = (fetch.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(init.body).toBe(form);
+    expect(init.headers).not.toHaveProperty('content-type');
+  });
+
   it('throws ApiError with the status, server message and body', async () => {
     const body = { error: 'Brak uprawnień.', code: 'x' };
     mockFetch(json(403, body));

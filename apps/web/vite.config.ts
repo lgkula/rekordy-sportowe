@@ -12,4 +12,6 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
   },
+  // Module workers (the FIT parser imports the Garmin SDK as ES modules).
+  worker: { format: 'es' },
 });

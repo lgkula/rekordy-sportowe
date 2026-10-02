@@ -210,7 +210,7 @@ activities
   external_id       VARCHAR NULL UNIQUE
   file_name         VARCHAR NULL UNIQUE
   file_sha256       CHAR(64) NULL UNIQUE
-  splits            JSON NULL          -- [{km, distance_m, duration_s, elevation_gain_m}]
+  splits            JSON NULL          -- [{km, distanceM, durationS, elevationGainM?, partial?}]
   has_stream        BOOL
   created_at / updated_at
 
@@ -256,7 +256,7 @@ settings
 All pipelines produce the same **`NormalizedActivity`** (defined in `packages/core`):
 
 ```ts
-{ sport, name, startTimeUtc, distanceM, durationS, elapsedS?, elevationGainM?,
+{ sport, name, startTimeUtc, localDate, distanceM, durationS, elapsedS?, elevationGainM?,
   isRace, isRaceConfidence: 'fit' | 'heuristic' | 'none',
   externalId?, fileName?, fileSha256?, activityUrl?,
   stream?: { t: number[]; d: number[]; alt?: number[] },
@@ -279,7 +279,7 @@ All pipelines produce the same **`NormalizedActivity`** (defined in `packages/co
 
 ### 6.2 FIT import (web)
 
-- A multi-file dropzone (`.fit`). Files are parsed **in the browser** with `packages/core`, so the preview is instant. After approval the raw files are sent to the server, which re-parses them and stores them.
+- A multi-file dropzone (`.fit`, and `.zip` archives such as Garmin Connect's "export original", unpacked in the browser). Files are parsed **in the browser** with `packages/core`, so the preview is instant. After approval the raw files are sent to the server, which re-parses them and stores them.
 - Duplicate check before preview: `POST /api/import/check` with `{fileName, sha256, externalId}` for all files.
 - **A review step for every file**:
   - summary, detected sport, detected race flag, computed efforts and splits
@@ -306,7 +306,7 @@ All pipelines produce the same **`NormalizedActivity`** (defined in `packages/co
 - **Garmin Connect export**:
   - `DI_CONNECT/DI-Connect-Fitness/*summarizedActivities*.json` (metadata; may contain event type = race)
   - `DI_CONNECT/DI-Connect-Uploaded-Files/*.zip` (original FIT files)
-  - URL `https://connect.garmin.com/modern/activity/<activityId>`
+  - URL `https://connect.garmin.com/app/activity/<activityId>`
   - the exact structure must be verified on a real export (open question Q4).
 - A **mode switch**:
   - *manual review* goes item by item (same review UI as FIT import)
@@ -409,7 +409,7 @@ Each part is one Claude Code session with its own prompt in `docs/prompts/`. Par
 
 | ID | Question | Part | Default if not answered |
 |---|---|---|---|
-| Q1 | How are races marked on the watch (a dedicated activity profile? Garmin race calendar?). Please provide 2–3 sample FIT files (race and non-race). | 3 | Heuristic + manual checkbox |
+| Q1 | How are races marked on the watch (a dedicated activity profile? Garmin race calendar?). Please provide 2–3 sample FIT files (race and non-race). | 3 | **Decided (Part 3):** a dedicated activity profile, "Bieg zawody"; the race flag comes from the profile name. See the decision log. |
 | Q2 | Should records use **timer time** (auto-pause excluded) or **elapsed time**? | 3, 4 | **Decided (Part 2): timer time** |
 | Q3 | Can one activity give more than one result per distance (e.g. two 5 km segments of a 10 km run)? | 4 | No, one per activity per distance |
 | Q4 | Which exports are available (Strava, Garmin Connect, both)? Please provide sample exports (or a trimmed version). | 6 | Support both |
@@ -437,7 +437,8 @@ Each part is one Claude Code session with its own prompt in `docs/prompts/`. Par
 | 0 | **done** (2026-10-02): scaffold, CI/deploy scripts, docs; spike verified on the host; first `npm run deploy` OK and https://sport.kula.opole.pl/api/health returns `ok`. Repo pushed to GitHub; deploy secrets set and the first GitHub Actions deploy OK (run 37067882668, `8c0e2d6`, `/api/health` ok). |
 | 1 | **done** (2026-10-02): scrypt hashes + `hash-secret` CLI, signed stateless session cookie (96 h / 90 days, sliding), login/logout/me/switch, default role guards + agent bearer token, DB-backed failed-attempt limit, login page, role badge/switch/logout in the header, `useCanEdit()`. Deployed (`c694de3`), secrets set on the host, `/api/health` ok; verified in production: `request.ip` is the real client IP behind LiteSpeed (a forged `X-Forwarded-For` is ignored), cookie flags `HttpOnly; Secure; SameSite=Strict`. |
 | 2 | **done** (2026-10-02, deployed `7b0822c`; production `/api/health` ok with 3 migrations applied, `/api/activities` answers 401 without a session): migration `0002_data_model` (all tables of section 5, indexes, FK cascades; verified on MariaDB 10.4), `packages/core` (sports/distances config, tolerance + Q8 rule, Polish time/distance parsing, shared Zod schemas, fuzzy-duplicate rule), duplicate detection service, activities API (list/get/create full+simple/patch/delete) with `recomputeEfforts` stub, **Aktywności** view (sport tabs, sortable paginated table, hidden toggle, edit, delete modal) and the form (Pełny/Uproszczony, splits, duplicate dialog). Tests: core unit, web form logic, DB integration (duplicates, API CRUD/sorting/hidden/roles). UI checked in headless Chromium against the dev server. |
-| 3–8 | not started |
+| 3 | **done** (2026-10-03, not deployed yet): `@rekordy/core/fit` (separate entry point: `parseFit` on `@garmin/fitsdk`, timer-based stream with pauses / GPS jumps / missing distances handled, per-km splits with the partial km flagged and elevation per split, sport + trail + race detection, `garmin:<serial>:<time_created>` external ID, SHA-256 via Web Crypto), the best-effort engine in core (`fastestSegmentS`, `effortsFromStream`, `computeEfforts`; `recomputeEfforts` now handles stream activities), `POST /api/import/check` + `POST /api/import/fit` (multipart, server re-parse, stream gzip, raw file `storage/fit/<yyyy>/<sha256>.fit.gz`), **Import → Pliki FIT** (Dropzone for `.fit` and `.zip`, Web Worker unzip + parse, Garmin Connect link from `<id>_ACTIVITY.fit`, duplicate check, per-file review, approve all, summary), read-only activity detail `/activities/:id` (results + splits table/bar chart). Tests: core unit + synthetic FIT files (SDK encoder) + the user's 6 anonymised files (splits within 2 s of the watch's 1 km auto-laps), import API integration, web import state. UI checked in headless Chrome against the dev server (test DB). |
+| 4–8 | not started |
 
 ### Decision log
 
@@ -465,6 +466,13 @@ Each part is one Claude Code session with its own prompt in `docs/prompts/`. Par
 | 2026-10-02 | **Part 2, efforts:** `recomputeEfforts(activityId)` never touches efforts that are `manual`, `is_edited` or `is_deleted` (only their denormalised sport); a manual effort entered again replaces a soft-deleted one. Activities with a stream are left for the Part 4 engine. Event assignment in the form is deferred to Part 5 (only `event_id` exists now). |
 | 2026-10-02 | **Part 2, validation:** shared Zod schemas in `packages/core` use **validation codes** as messages (`invalid_duration`, `effort_distance_too_short`, …); the web maps them to Polish text in `pl.validation`, so UI strings stay in `pl.ts`. MariaDB JSON is LONGTEXT, so JSON columns use a custom Drizzle type that parses strings; DECIMAL columns use `mode: 'number'`. |
 | 2026-10-02 | **GitHub Actions deploy works.** Repository secrets `SSH_HOST`, `SSH_PORT`, `SSH_USER`, `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS`; dedicated key `~/.ssh/rekordy_github_deploy` (comment `github-actions-rekordy`) in the host's `authorized_keys`. The key must have **no passphrase**: `ssh-keygen -N '""'` in PowerShell 7 sets the literal passphrase `""`, so WDROZENIE.md now generates the key interactively. First run deployed `8c0e2d6` in about 1 min. Workflows use `actions/checkout@v7` and `actions/setup-node@v7` (Node 24 runtime; v4 ran on the deprecated Node 20). |
+| 2026-10-03 | **Part 3, Q1 (race detection):** the user's Fenix 7X files have no race-calendar or event field; races are recorded with a dedicated activity profile **"Bieg zawody"** (ordinary runs: "Bieg"), stored in `sport.name` / `session.sport_profile_name`. Rule: profile name matches `/zawod|race|wyścig/i` → `isRace = true`, `isRaceConfidence = 'fit'`; otherwise `false` / `'none'` (no heuristic; the review has a checkbox). |
+| 2026-10-03 | **Part 3, sport detection:** all sample files are `running/generic`, including a mountain race. `trail_run` when `sub_sport = trail`, or the profile name matches `/trail|teren|przełaj|górsk/i`, or the average climb is **≥ 20 m/km** (the mountain race: 34 m/km, other runs 1–4 m/km); otherwise `road_run`. Shown with its source in the review and editable. **Treadmill / indoor runs** (`treadmill`, `indoorRunning`, `virtualActivity`) are **unsupported** (not imported). `crossCountrySkiing` → `xc_ski`. Multisport files are rejected. |
+| 2026-10-03 | **Part 3, FIT normalisation:** totals come from the `session` message (Garmin Connect's numbers): distance, timer time (`duration_s`), elapsed time, total ascent. Local date / name from the activity's `local_timestamp` offset (fallback: timestamp correlation, then Europe/Warsaw). Default name = profile name + local date, e.g. "Bieg zawody 27.09.2026". Stream: `record` samples as recorded (1 s on training, "smart recording" 1–8 s in the race profile; not resampled), timer axis from `timer` start/stop events, samples without distance dropped, distance forced monotonic, steps faster than 12 m/s (25 m/s for skiing) cut down as GPS jumps. Splits: kilometre boundaries of the cumulative distance with linear interpolation, the last piece flagged `partial`; elevation per split from altitude with a 1 m hysteresis, scaled to add up to the session's total ascent. On the user's races the splits match the watch's 1 km auto-laps within 1 s. |
+| 2026-10-03 | **Part 3, best efforts moved forward from Part 4:** `fastestSegmentS` (two-pointer sliding window, both window edges interpolated) + `effortsFromStream` (stream covers T → fastest segment; otherwise the Q8 totals rule, i.e. a tolerance result for `0.9·T ≤ d < T`) in core; used for the import preview and by `recomputeEfforts` for stream activities. Part 4 builds the records view and the recompute-all job on top of it. |
+| 2026-10-03 | **Part 3, import flow:** files are parsed in a Web Worker (the Garmin SDK is a separate entry point `@rekordy/core/fit` and a separate chunk, ~440 kB). Duplicate check right after parsing: within the batch (a file dropped twice / renamed copy) and on the server (hard → "duplikat", fuzzy → "podobna aktywność", saving needs a checkbox). Each approved file is uploaded on its own (`meta` JSON + `file`, multipart, limit **10 MB** per file; the host passes 60 MB); "Zatwierdź wszystkie pozostałe" uploads the remaining files without an unconfirmed warning, one by one. The server re-parses the file and takes from the client only the review fields (name, sport, race, hidden, URL, notes, `editionLabel` placeholder; event assignment is Part 5). The raw file is stored before the DB insert (content-addressed, so a repeat is a no-op). The activity URL cannot be derived from a FIT file: entered by hand (or from the bulk import later). |
+| 2026-10-03 | **Part 3, test fixtures:** the user's sample files are committed only as anonymised copies in `packages/core/test/fixtures/` (`scripts/anonymize-fit.mjs`: re-encoded with the SDK, keeping file_id/sport/session/lap/activity/timer events/record time-distance-altitude-speed; GPS, heart rate, device and user data dropped; serial number replaced). The originals are not committed. |
+| 2026-10-03 | **Part 3, ZIP archives / Garmin Connect link:** Garmin Connect's "export original" is `<activityId>.zip` containing `<activityId>_ACTIVITY.fit` (checked on the user's download). The FIT import accepts `.zip` (up to 50 MB) and unpacks it in the Web Worker with **fflate**: every `.fit` inside (any folder; `__MACOSX` / dot files skipped) becomes its own item ("z archiwum …"); FIT files over 10 MB are not inflated (size from the central directory); a damaged archive or one without FIT files is an error item. The server receives the extracted `.fit`, so file name / hash duplicates use the inner file. A file named `<digits>_ACTIVITY.fit` pre-fills the link **`https://connect.garmin.com/app/activity/<id>`** (the user's URL format; `/modern/activity/` is the old one), editable in the review. |
 
 ---
 

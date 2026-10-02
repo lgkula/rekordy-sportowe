@@ -11,6 +11,7 @@ import { authPlugin, type AuthOptions } from './auth/plugin';
 import type { Db } from './db/client';
 import { activityRoutes } from './routes/activities';
 import { authRoutes } from './routes/auth';
+import { importRoutes } from './routes/imports';
 import { healthRoutes, type HealthDeps } from './routes/health';
 
 export type BuildAppOptions = {
@@ -19,6 +20,8 @@ export type BuildAppOptions = {
   auth: AuthOptions;
   /** Routes that need the database are registered only with it (tests may omit it). */
   db?: Db;
+  /** Root of stored files (original FIT files); the import routes need it. */
+  storageDir?: string;
   logger?: FastifyServerOptions['logger'];
 };
 
@@ -42,6 +45,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(healthRoutes(options.health));
       await api.register(authRoutes);
       if (options.db) await api.register(activityRoutes(options.db));
+      if (options.db && options.storageDir) {
+        await api.register(importRoutes(options.db, options.storageDir));
+      }
     },
     { prefix: '/api' },
   );

@@ -8,14 +8,16 @@ import {
   type ActivityPatch,
   type DuplicateConflict,
   type ManualEffortInput,
+  type Stream,
   type ValidationIssue,
 } from '@rekordy/core';
 import { asc, count, desc, eq, type SQL } from 'drizzle-orm';
 import type { Db } from '../db/client';
-import { activities, efforts } from '../db/schema';
+import { activities, activityStreams, efforts } from '../db/schema';
 import { findHardDuplicate, findSimilarActivities } from './duplicates';
 import { getManualEffortInput, recomputeEfforts, setManualEffort } from './efforts';
 import { activityMessages } from './messages';
+import { encodeStream } from './streams';
 import {
   fromSqlDateTime,
   listColumns,
@@ -126,6 +128,15 @@ function isDuplicateEntry(error: unknown): boolean {
 
 export type CreateResult = { ok: true; id: number } | { ok: false; conflict: DuplicateConflict };
 
+export type CreateOptions = {
+  manualEffort?: ManualEffortInput | null;
+  confirmDuplicate?: boolean;
+  /** Recorded samples (imports); stored in `activity_streams` and used for the efforts. */
+  stream?: Stream | null;
+  /** Runs after the duplicate checks, before anything is inserted (e.g. storing the file). */
+  beforeInsert?: () => Promise<void>;
+};
+
 /**
  * Saves a new activity with its efforts, unless it is a duplicate (PLAN.md 4.4):
  * the same external ID / file name / file hash always blocks; a similar activity
@@ -135,7 +146,7 @@ export type CreateResult = { ok: true; id: number } | { ok: false; conflict: Dup
 export async function createActivity(
   db: Db,
   row: NewActivityRow,
-  options: { manualEffort?: ManualEffortInput | null; confirmDuplicate?: boolean } = {},
+  options: CreateOptions = {},
 ): Promise<CreateResult> {
   const hardConflict = async (): Promise<CreateResult | null> => {
     const hard = await findHardDuplicate(db, row);
@@ -164,10 +175,17 @@ export async function createActivity(
     }
   }
 
+  const streamData = options.stream ? await encodeStream(options.stream) : null;
+  await options.beforeInsert?.();
+
   try {
     const id = await db.transaction(async (tx) => {
-      const [inserted] = await tx.insert(activities).values(row).$returningId();
+      const [inserted] = await tx
+        .insert(activities)
+        .values({ ...row, hasStream: streamData !== null })
+        .$returningId();
       const activityId = inserted!.id;
+      if (streamData) await tx.insert(activityStreams).values({ activityId, data: streamData });
       if (options.manualEffort) {
         await setManualEffort(
           tx,

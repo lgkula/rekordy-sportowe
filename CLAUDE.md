@@ -39,8 +39,10 @@ apps/server     Fastify API + serves the SPA; Drizzle (MySQL/MariaDB); tsup bund
   drizzle/        generated SQL migrations (shipped in the artifact)
   deploy/app.js   Passenger startup file (CommonJS)
 apps/web        React + Vite + Mantine SPA (Polish UI)
-packages/core   shared domain logic (browser + Node, no Node-only APIs)
-scripts/        package.mjs (artifact), deploy.mjs + deploy-remote.sh (deploy over SSH)
+packages/core   shared domain logic (browser + Node, no Node-only APIs); FIT parser in src/fit
+                (entry `@rekordy/core/fit`), anonymised FIT fixtures in test/fixtures
+scripts/        package.mjs (artifact), deploy.mjs + deploy-remote.sh (deploy over SSH),
+                anonymize-fit.mjs (FIT test fixtures without GPS / HR)
 spikes/         throwaway experiments (passenger-hello)
 docs/           PLAN.md, prompts, DEPLOYMENT.md (EN), WDROZENIE.md (PL)
 ```

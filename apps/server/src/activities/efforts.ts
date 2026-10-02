@@ -1,5 +1,5 @@
 import {
-  effortsFromTotals,
+  computeEfforts,
   manualEffort,
   type DistanceKey,
   type EffortValues,
@@ -8,6 +8,7 @@ import {
 import { and, eq, inArray } from 'drizzle-orm';
 import { activities, efforts } from '../db/schema';
 import type { EffortRow, Executor } from './rows';
+import { loadStream } from './streams';
 
 function effortColumns(values: EffortValues) {
   return {
@@ -29,9 +30,8 @@ function isProtected(row: EffortRow): boolean {
  * and edit. Manual, edited and soft-deleted results are kept as they are; only their
  * denormalised sport follows the activity.
  *
- * Activities without a stream get results from their totals (PLAN.md Q8). Activities with a
- * stream are left unchanged here: Part 4 plugs in the best-effort engine (sliding window over
- * the stream).
+ * Activities with a stream get the fastest segment per distance (PLAN.md 4.1); activities
+ * without one get results from their totals (PLAN.md Q8).
  */
 export async function recomputeEfforts(db: Executor, activityId: number): Promise<void> {
   const [activity] = await db
@@ -46,11 +46,11 @@ export async function recomputeEfforts(db: Executor, activityId: number): Promis
   if (!activity) return;
 
   await db.update(efforts).set({ sport: activity.sport }).where(eq(efforts.activityId, activityId));
-  if (activity.hasStream) return;
+  const stream = activity.hasStream ? await loadStream(db, activityId) : null;
 
   const existing = await db.select().from(efforts).where(eq(efforts.activityId, activityId));
   const protectedKeys = new Set(existing.filter(isProtected).map((row) => row.distanceKey));
-  const wanted = effortsFromTotals(activity.sport, activity.distanceM, activity.durationS).filter(
+  const wanted = computeEfforts({ ...activity, stream }).filter(
     (values) => !protectedKeys.has(values.distanceKey),
   );
   const wantedKeys = new Set<string>(wanted.map((values) => values.distanceKey));

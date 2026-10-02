@@ -21,11 +21,15 @@ export function setUnauthorizedHandler(handler: () => void): void {
 
 type ApiRequest = { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown };
 
-/** JSON fetch against our API. The session cookie travels automatically (same origin). */
+/**
+ * Fetch against our API: a JSON body, or `FormData` for file uploads (multipart). The answer
+ * is JSON. The session cookie travels automatically (same origin).
+ */
 export async function apiFetch<T>(
   path: string,
   { method = 'GET', body }: ApiRequest = {},
 ): Promise<T> {
+  const isForm = body instanceof FormData;
   let res: Response;
   try {
     res = await fetch(path, {
@@ -33,10 +37,11 @@ export async function apiFetch<T>(
       credentials: 'same-origin',
       headers: {
         accept: 'application/json',
-        // Fastify rejects an empty body declared as JSON, so set it only with a body.
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        // Fastify rejects an empty body declared as JSON, so set it only with a body. The
+        // browser sets the multipart content type (with its boundary) for FormData.
+        ...(body === undefined || isForm ? {} : { 'content-type': 'application/json' }),
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
     });
   } catch (error) {
     throw new ApiError(0, error instanceof Error ? error.message : String(error));

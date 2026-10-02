@@ -31,6 +31,7 @@ async function main(): Promise<void> {
     },
     auth: { config: config.auth, limiter: createDbLimiter(database.pool) },
     db: database.db,
+    storageDir: config.storageDir,
   });
 
   app.addHook('onClose', async () => {

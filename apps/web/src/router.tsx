@@ -1,3 +1,5 @@
+import { Center, Loader } from '@mantine/core';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router';
 import { EditorOnly, RequireAuth } from './auth/RequireAuth';
 import { Layout } from './components/Layout';
@@ -8,6 +10,28 @@ import { ActivityFormPage } from './pages/ActivityFormPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
+
+// Pages with charts and the FIT import load on demand, keeping the main bundle small.
+const ActivityDetailPage = lazy(() =>
+  import('./pages/ActivityDetailPage').then((m) => ({ default: m.ActivityDetailPage })),
+);
+const ImportPage = lazy(() =>
+  import('./pages/ImportPage').then((m) => ({ default: m.ImportPage })),
+);
+
+function Lazy({ children }: { children: ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <Center py="xl">
+          <Loader />
+        </Center>
+      }
+    >
+      {children}
+    </Suspense>
+  );
+}
 
 export const router = createBrowserRouter([
   { path: 'login', element: <LoginPage /> },
@@ -31,6 +55,14 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: 'activities/:id',
+        element: (
+          <Lazy>
+            <ActivityDetailPage />
+          </Lazy>
+        ),
+      },
+      {
         path: 'activities/:id/edit',
         element: (
           <EditorOnly>
@@ -42,7 +74,9 @@ export const router = createBrowserRouter([
         path: 'import',
         element: (
           <EditorOnly>
-            <PlaceholderPage title={pl.pages.import.title} />
+            <Lazy>
+              <ImportPage />
+            </Lazy>
           </EditorOnly>
         ),
       },

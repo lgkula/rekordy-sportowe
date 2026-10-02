@@ -1,4 +1,6 @@
 import { paceSecondsPerKm } from './format';
+import type { Stream } from './schemas';
+import { fastestSegmentS, streamDistanceM } from './stream';
 import {
   DISTANCES,
   qualifiesForTarget,
@@ -86,6 +88,46 @@ export function effortsFromTotals(
   return sportDistances(sport)
     .map(({ key }) => effortFromTotals(key, distanceM, durationS))
     .filter((e): e is EffortValues => e !== null);
+}
+
+/**
+ * All results of an activity with a stream (PLAN.md 4.1), one per record distance:
+ * - the stream covers the target: the fastest contiguous segment of exactly the target;
+ * - otherwise the totals rule (`effortFromTotals`), which gives a tolerance result over the
+ *   whole activity when `0.9·T ≤ d < T`.
+ */
+export function effortsFromStream(
+  sport: Sport,
+  stream: Stream,
+  distanceM: number,
+  durationS: number | null,
+): EffortValues[] {
+  const covered = streamDistanceM(stream);
+  const results: EffortValues[] = [];
+  for (const { key, targetM } of sportDistances(sport)) {
+    const fastest = covered >= targetM ? fastestSegmentS(stream, targetM) : null;
+    const result =
+      fastest !== null
+        ? effort(key, targetM, fastest, false)
+        : durationS !== null
+          ? effortFromTotals(key, distanceM, durationS)
+          : null;
+    if (result) results.push(result);
+  }
+  return results;
+}
+
+/** Results of an activity: from its stream when it has one, from its totals otherwise. */
+export function computeEfforts(activity: {
+  sport: Sport;
+  distanceM: number;
+  durationS: number | null;
+  stream?: Stream | null;
+}): EffortValues[] {
+  const { sport, distanceM, durationS, stream } = activity;
+  return stream && stream.t.length >= 2
+    ? effortsFromStream(sport, stream, distanceM, durationS)
+    : effortsFromTotals(sport, distanceM, durationS);
 }
 
 /**

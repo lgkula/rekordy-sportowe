@@ -84,6 +84,8 @@ export const splitSchema = z.object({
   distanceM: distanceMSchema,
   durationS: durationSSchema,
   elevationGainM: elevationSchema.nullable().optional(),
+  /** The last piece of an activity, shorter than 1 km (computed splits only). */
+  partial: z.boolean().optional(),
 });
 export type Split = z.infer<typeof splitSchema>;
 
@@ -107,6 +109,8 @@ export const normalizedActivitySchema = z.object({
   sport: sportSchema,
   name: nameSchema,
   startTimeUtc: utcDateTimeSchema,
+  /** Calendar date at the start, in the activity's local time zone. */
+  localDate: localDateSchema,
   distanceM: distanceMSchema,
   durationS: durationSSchema,
   elapsedS: durationSSchema.optional(),
@@ -350,3 +354,59 @@ export type DuplicateConflict =
       /** Similar activities; resend with `confirmDuplicate: true` to save anyway. */
       similar: ActivityListItem[];
     };
+
+/** One file of a FIT import batch, checked for duplicates before the review (PLAN.md 6.2). */
+export const importCheckItemSchema = z.object({
+  /** Client-side identifier, echoed back in the result. */
+  key: z.string().min(1).max(100),
+  fileName: z.string().min(1).max(255),
+  fileSha256: sha256Schema,
+  externalId: z.string().max(100).nullable().optional(),
+  /** With the distance, used for the fuzzy (similar activity) check. */
+  startTimeUtc: utcDateTimeSchema.nullable().optional(),
+  localDate: localDateSchema.optional(),
+  distanceM: distanceMSchema.optional(),
+});
+export type ImportCheckItem = z.infer<typeof importCheckItemSchema>;
+
+export const importCheckRequestSchema = z.object({
+  items: z.array(importCheckItemSchema).min(1).max(500),
+});
+export type ImportCheckRequest = z.infer<typeof importCheckRequestSchema>;
+
+export type ImportCheckResult =
+  | { key: string; status: 'new' }
+  | {
+      key: string;
+      status: 'duplicate';
+      field: 'externalId' | 'fileName' | 'fileSha256';
+      activity: ActivityListItem;
+    }
+  | { key: string; status: 'similar'; similar: ActivityListItem[] };
+
+export type ImportCheckResponse = { results: ImportCheckResult[] };
+
+/**
+ * What the user may change in the review step of a FIT import; sent as the `meta` field of
+ * the multipart upload. Everything else comes from the server's own parse of the file.
+ */
+export const fitImportMetaSchema = z.object({
+  name: nameSchema,
+  sport: sportSchema,
+  isRace: z.boolean(),
+  isHidden: z.boolean().default(false),
+  activityUrl: urlOrNull.optional(),
+  notes: textOrNull(5000).optional(),
+  /** Placeholder until events are assigned in the review (Part 5). */
+  editionLabel: textOrNull(100).optional(),
+  /** Save even though a similar activity exists (fuzzy duplicate, PLAN.md 4.4). */
+  confirmDuplicate: z.boolean().optional(),
+});
+export type FitImportMetaInput = z.input<typeof fitImportMetaSchema>;
+export type FitImportMeta = z.output<typeof fitImportMetaSchema>;
+
+/**
+ * Largest FIT file accepted by the import (a long activity recorded every second is a few
+ * MB; the host passes uploads of at least 60 MB, see PLAN.md decision log).
+ */
+export const FIT_MAX_FILE_BYTES = 10 * 1024 * 1024;
