@@ -100,10 +100,25 @@ export function FitReview({
         })
       : r.sportSources[details.sportSource];
 
+  const actions = (
+    <>
+      <Button variant="default" onClick={onSkip} disabled={saving}>
+        {r.skip}
+      </Button>
+      <Button onClick={onApprove} loading={saving} disabled={needsConfirmation}>
+        {r.approve}
+      </Button>
+    </>
+  );
+
   return (
     <Paper withBorder p="md">
       <Stack>
-        <Title order={4}>{t(r.title, { current: position, total, file: item.file.name })}</Title>
+        {/* The actions are repeated at the top, so a long review needs no scrolling. */}
+        <Group justify="space-between" align="flex-start" gap="sm">
+          <Title order={4}>{t(r.title, { current: position, total, file: item.file.name })}</Title>
+          <Group gap="xs">{actions}</Group>
+        </Group>
 
         <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
           <Stat label={s.date} value={formatLocalDate(activity.localDate)} />
@@ -210,14 +225,7 @@ export function FitReview({
           </Stack>
         </SimpleGrid>
 
-        <Group justify="flex-end">
-          <Button variant="default" onClick={onSkip} disabled={saving}>
-            {r.skip}
-          </Button>
-          <Button onClick={onApprove} loading={saving} disabled={needsConfirmation}>
-            {r.approve}
-          </Button>
-        </Group>
+        <Group justify="flex-end">{actions}</Group>
       </Stack>
     </Paper>
   );
