@@ -35,7 +35,19 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
-async function waitForHealth(timeoutMs = 90_000) {
+/** Version the server reports after this deploy (`<version>+<commit>`, as in /api/health). */
+function expectedVersion() {
+  const info = JSON.parse(
+    readFileSync(path.join(root, 'deploy', 'rekordy-sportowe', 'build-info.json'), 'utf8'),
+  );
+  return `${info.version}+${info.commit}`;
+}
+
+/**
+ * Waits until /api/health is ok AND reports the deployed version: right after the restart an
+ * old process may still answer, which must not count as a successful deploy.
+ */
+async function waitForHealth(version, timeoutMs = 90_000) {
   const deadline = Date.now() + timeoutMs;
   let last = 'no response';
   while (Date.now() < deadline) {
@@ -46,7 +58,16 @@ async function waitForHealth(timeoutMs = 90_000) {
       });
       const text = await res.text();
       last = `HTTP ${res.status} ${text}`;
-      if (res.ok) return text;
+      if (res.ok) {
+        let reported;
+        try {
+          reported = JSON.parse(text).version;
+        } catch {
+          reported = undefined;
+        }
+        if (reported === version) return text;
+        last = `still version ${reported ?? '?'}, expected ${version}: ${text}`;
+      }
     } catch (error) {
       last = error instanceof Error ? error.message : String(error);
     }
@@ -80,8 +101,9 @@ async function main() {
     stdio: ['pipe', 'inherit', 'inherit'],
   });
 
-  step(`Health check ${url}/api/health`);
-  console.log(await waitForHealth());
+  const version = expectedVersion();
+  step(`Health check ${url}/api/health (expecting ${version})`);
+  console.log(await waitForHealth(version));
   console.log('\nDeploy OK');
 }
 
