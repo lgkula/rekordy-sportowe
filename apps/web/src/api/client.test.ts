@@ -41,9 +41,10 @@ describe('apiFetch', () => {
     expect(init.headers).not.toHaveProperty('content-type');
   });
 
-  it('throws ApiError with the status and server message', async () => {
-    mockFetch(json(403, { error: 'Brak uprawnień.' }));
-    await expect(apiFetch('/api/x')).rejects.toEqual(new ApiError(403, 'Brak uprawnień.'));
+  it('throws ApiError with the status, server message and body', async () => {
+    const body = { error: 'Brak uprawnień.', code: 'x' };
+    mockFetch(json(403, body));
+    await expect(apiFetch('/api/x')).rejects.toEqual(new ApiError(403, 'Brak uprawnień.', body));
   });
 
   it('reports an unreachable server as status 0', async () => {

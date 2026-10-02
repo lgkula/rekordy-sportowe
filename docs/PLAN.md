@@ -194,10 +194,10 @@ activities
   id                PK
   sport             ENUM('road_run','trail_run','xc_ski')
   name              VARCHAR
-  start_time_utc    DATETIME
+  start_time_utc    DATETIME NULL      -- NULL when only the date is known (manual entry)
   local_date        DATE               -- for display/grouping
   distance_m        DECIMAL(9,1)
-  duration_s        DECIMAL(9,1)       -- timer time (auto-pause excluded), see Q2
+  duration_s        DECIMAL(9,1) NULL  -- timer time (auto-pause excluded), Q2; NULL only for a simplified entry without it
   elapsed_s         DECIMAL(9,1) NULL
   elevation_gain_m  INT NULL
   is_race           BOOL
@@ -410,13 +410,13 @@ Each part is one Claude Code session with its own prompt in `docs/prompts/`. Par
 | ID | Question | Part | Default if not answered |
 |---|---|---|---|
 | Q1 | How are races marked on the watch (a dedicated activity profile? Garmin race calendar?). Please provide 2–3 sample FIT files (race and non-race). | 3 | Heuristic + manual checkbox |
-| Q2 | Should records use **timer time** (auto-pause excluded) or **elapsed time**? | 3, 4 | Timer time |
+| Q2 | Should records use **timer time** (auto-pause excluded) or **elapsed time**? | 3, 4 | **Decided (Part 2): timer time** |
 | Q3 | Can one activity give more than one result per distance (e.g. two 5 km segments of a 10 km run)? | 4 | No, one per activity per distance |
 | Q4 | Which exports are available (Strava, Garmin Connect, both)? Please provide sample exports (or a trimmed version). | 6 | Support both |
 | Q5 | Should files sent by the Windows script be approved manually (inbox) or automatically? | 7 | Inbox (manual) with an auto-approve setting |
 | Q6 | For the trail-running event list: which elevation gain to show (best edition's, latest edition's, or average)? | 5 | From the edition with the best pace |
 | Q7 | Remaining Seohost details: app root path, domain/subdomain for the app, the Node 22 binary path over SSH (or the env activation command shown by the panel), whether `tmp/restart.txt` or a selector CLI restarts the app, where Passenger logs are visible, cron availability, MySQL vs MariaDB version. Known already: SSH available, Node v22.23.2, panel form fields (screenshot). | 0 | Ask. Blocks deployment. |
-| Q8 | For manually entered activities without a stream that are longer than a target (e.g. 5.3 km with total time only): count them for 5 km using average pace, or not? | 2, 4 | Count them if `distance ≤ 1.05·T`, using average pace (time scaled to T); otherwise do not |
+| Q8 | For manually entered activities without a stream that are longer than a target (e.g. 5.3 km with total time only): count them for 5 km using average pace, or not? | 2, 4 | **Decided (Part 2):** `T ≤ d ≤ 1.01·T` → full result, time scaled to T; `0.9·T ≤ d < T` or `1.01·T < d ≤ 1.1·T` → tolerance result (average pace, no time shown); no tolerance for 1 km; otherwise nothing. See the decision log. |
 | Q9 | Should the event distance shown in the list be editable, or always computed from editions? | 5 | Computed, with manual override |
 
 ---
@@ -436,7 +436,8 @@ Each part is one Claude Code session with its own prompt in `docs/prompts/`. Par
 |---|---|
 | 0 | **done** (2026-10-02): scaffold, CI/deploy scripts, docs; spike verified on the host; first `npm run deploy` OK and https://sport.kula.opole.pl/api/health returns `ok`. Pending: first commit/push to GitHub, then the first CI run and the GitHub Actions deploy secrets. |
 | 1 | **done** (2026-10-02): scrypt hashes + `hash-secret` CLI, signed stateless session cookie (96 h / 90 days, sliding), login/logout/me/switch, default role guards + agent bearer token, DB-backed failed-attempt limit, login page, role badge/switch/logout in the header, `useCanEdit()`. Deployed (`c694de3`), secrets set on the host, `/api/health` ok; verified in production: `request.ip` is the real client IP behind LiteSpeed (a forged `X-Forwarded-For` is ignored), cookie flags `HttpOnly; Secure; SameSite=Strict`. |
-| 2–8 | not started |
+| 2 | **done** (2026-10-02, not yet committed/deployed): migration `0002_data_model` (all tables of section 5, indexes, FK cascades; verified on MariaDB 10.4), `packages/core` (sports/distances config, tolerance + Q8 rule, Polish time/distance parsing, shared Zod schemas, fuzzy-duplicate rule), duplicate detection service, activities API (list/get/create full+simple/patch/delete) with `recomputeEfforts` stub, **Aktywności** view (sport tabs, sortable paginated table, hidden toggle, edit, delete modal) and the form (Pełny/Uproszczony, splits, duplicate dialog). Tests: core unit, web form logic, DB integration (duplicates, API CRUD/sorting/hidden/roles). UI checked in headless Chromium against the dev server. |
+| 3–8 | not started |
 
 ### Decision log
 
@@ -456,6 +457,13 @@ Each part is one Claude Code session with its own prompt in `docs/prompts/`. Par
 | 2026-10-02 | **Part 1 (auth):** session lifetime **96 h** without "remember" (browser-session cookie) and **90 days** with it, both **sliding** (cookie re-issued when older than 1 h). The viewer password is changed only via `.env` + `hash-secret` (no UI). Rate limit = own limiter in MariaDB (`auth_failures`, 10 failures / 15 min per IP, fixed window), counting **only failed** passwords/tokens and **not reset** by a success (so the known viewer password cannot be used to reset the counter); `@fastify/rate-limit` not used (its in-memory store is not Passenger-safe). `hash-secret` is interactive with hidden input (`ssh -t` on the host), `--write` edits `.env` in place. |
 | 2026-10-02 | Auth implementation details: hashes `scrypt:N:r:p:salt:hash` (N=16384, r=8, p=1, Node `crypto.scrypt`); cookie `rs_session` = base64url JSON + HMAC-SHA256 (`SESSION_SECRET`), no server state. Default guards: matched `/api/*` routes need a session, non-GET need `editor`, `/api/agent/*` only the bearer token (cookies ignored there, token rejected elsewhere). Missing secrets: the app still starts (so `tools.cjs migrate` works), login answers 503 and `/api/health` 503 with `auth.configured: false`. `trustProxy` = trust only the immediate peer (Fastify 5 ignores a numeric hop count), so `request.ip` is the last X-Forwarded-For entry. Editor password ≥ 12 characters. |
 | 2026-10-02 | Display formats: pace `m:ss` (+ ` /km`); duration `m:ss` below 1 h and `h:mm:ss` from 1 h; distance with a Polish decimal comma, no thousands grouping. |
+| 2026-10-02 | **Part 2, Q2:** `duration_s` = timer time (auto-pause excluded); total time goes to `elapsed_s`. |
+| 2026-10-02 | **Part 2, Q8** (activities without a stream, target T): `T ≤ d ≤ 1.01·T` counts as a full result with the time scaled to T (GPS margin; applies to 1 km too); `0.9·T ≤ d < T` and `1.01·T < d ≤ 1.1·T` give a **tolerance result** over the whole activity (average pace, time hidden, actual distance in the tooltip), only for T > 1 km; anything else gives no result. Implemented in `effortFromTotals` (core) and used by `recomputeEfforts` for every stream-less activity. |
+| 2026-10-02 | **Part 2, simplified form:** fields sport, name, date, distance, record (distance key + time), optional whole-activity time, link. The record time covers the target when the activity is at least T long (`actual = T`, full result), or the whole activity when it is shorter (tolerance result; needs `d ≥ 0.9·T`, `d ≥ T` for 1 km). Without a whole-activity time, the server copies the record time when `d ≤ T`; otherwise `duration_s` stays NULL (shown as “—”). Source `manual_simple`, one `origin = manual` effort. |
+| 2026-10-02 | **Part 2, activities list:** default sort date desc (name/distance default asc), server-side pagination 50 per page, sport tabs incl. “Wszystkie”; list state in the URL. Hidden activities stay in the list for everyone, greyed out. |
+| 2026-10-02 | **Part 2, start time / fuzzy duplicates:** the start time is optional (full form; the simplified form has the date only), so `start_time_utc` is nullable. Fuzzy rule: distance within ±3% of the new activity and start within ±2 min, or the **same local date** when either start time is unknown. Fuzzy → 409 `similar_activity` until the client resends with `confirmDuplicate: true`; hard (`external_id` / `file_name` / `file_sha256`) → 409 `duplicate` always (also after a lost race on the UNIQUE indexes). Duplicates are checked on create only, not on PATCH. |
+| 2026-10-02 | **Part 2, efforts:** `recomputeEfforts(activityId)` never touches efforts that are `manual`, `is_edited` or `is_deleted` (only their denormalised sport); a manual effort entered again replaces a soft-deleted one. Activities with a stream are left for the Part 4 engine. Event assignment in the form is deferred to Part 5 (only `event_id` exists now). |
+| 2026-10-02 | **Part 2, validation:** shared Zod schemas in `packages/core` use **validation codes** as messages (`invalid_duration`, `effort_distance_too_short`, …); the web maps them to Polish text in `pl.validation`, so UI strings stay in `pl.ts`. MariaDB JSON is LONGTEXT, so JSON columns use a custom Drizzle type that parses strings; DECIMAL columns use `mode: 'number'`. |
 
 ---
 

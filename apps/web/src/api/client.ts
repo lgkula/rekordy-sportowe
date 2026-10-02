@@ -1,11 +1,14 @@
 /** Error from an API call: `status` is the HTTP status, or 0 when the server was unreachable. */
 export class ApiError extends Error {
   readonly status: number;
+  /** Parsed JSON error body (e.g. a duplicate conflict), or null. */
+  readonly body: unknown;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, body: unknown = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -44,7 +47,11 @@ export async function apiFetch<T>(
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith('/api/auth/')) unauthorizedHandler?.();
     const message = (data as { error?: unknown } | null)?.error;
-    throw new ApiError(res.status, typeof message === 'string' ? message : `HTTP ${res.status}`);
+    throw new ApiError(
+      res.status,
+      typeof message === 'string' ? message : `HTTP ${res.status}`,
+      data,
+    );
   }
   return data as T;
 }

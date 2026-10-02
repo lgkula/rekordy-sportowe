@@ -1,4 +1,6 @@
-import type { AuthOptions } from '../auth/plugin';
+import type { FastifyInstance } from 'fastify';
+import { SESSION_COOKIE, type AuthOptions } from '../auth/plugin';
+import type { SessionRole } from '../auth/session';
 import { createMemoryLimiter, type AttemptLimiter } from '../auth/limiter';
 import { hashSecret } from '../auth/secrets';
 import type { AuthConfig } from '../config';
@@ -32,4 +34,19 @@ export function testAuth(
   limiter: AttemptLimiter = createMemoryLimiter(),
 ): AuthOptions {
   return { config: testAuthConfig(overrides), limiter };
+}
+
+/** Logs in through the API and returns the `cookie` request header for later calls. */
+export async function loginHeaders(
+  app: FastifyInstance,
+  role: SessionRole,
+): Promise<{ cookie: string }> {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/auth/login',
+    payload: { password: role === 'editor' ? EDITOR_PASSWORD : VIEWER_PASSWORD },
+  });
+  const cookie = res.cookies.find((c) => c.name === SESSION_COOKIE);
+  if (res.statusCode !== 200 || !cookie) throw new Error(`Login as ${role} failed`);
+  return { cookie: `${SESSION_COOKIE}=${cookie.value}` };
 }

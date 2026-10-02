@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { formatDistance, formatDuration, formatPace, paceSecondsPerKm } from './format';
+import {
+  formatDistance,
+  formatDuration,
+  formatLocalDate,
+  formatPace,
+  paceSecondsPerKm,
+} from './format';
 
 describe('paceSecondsPerKm', () => {
   it('computes seconds per kilometre', () => {
@@ -76,5 +82,15 @@ describe('formatDistance', () => {
 
   it('returns a placeholder for invalid input', () => {
     expect(formatDistance(-1)).toBe('—');
+  });
+});
+
+describe('formatLocalDate', () => {
+  it('formats as dd.MM.yyyy', () => {
+    expect(formatLocalDate('2026-09-12')).toBe('12.09.2026');
+  });
+
+  it('returns a placeholder for invalid input', () => {
+    expect(formatLocalDate('12.09.2026')).toBe('—');
   });
 });

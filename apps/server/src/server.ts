@@ -30,6 +30,7 @@ async function main(): Promise<void> {
       checkStorage: () => checkStorageWritable(config.storageDir),
     },
     auth: { config: config.auth, limiter: createDbLimiter(database.pool) },
+    db: database.db,
   });
 
   app.addHook('onClose', async () => {
