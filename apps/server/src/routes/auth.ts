@@ -2,9 +2,17 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { authMessages } from '../auth/messages';
-import type { SessionRole } from '../auth/session';
+import type { Session, SessionRole } from '../auth/session';
 
-export type AuthResponse = { role: SessionRole; remember: boolean };
+export type AuthResponse = { role: SessionRole; remember: boolean; editorUnlocked: boolean };
+
+function authResponse(session: Session): AuthResponse {
+  return {
+    role: session.role,
+    remember: session.remember,
+    editorUnlocked: session.editorUnlocked,
+  };
+}
 
 const password = z.string().min(1).max(256);
 
@@ -16,6 +24,8 @@ const loginBody = z.object({
 const switchBody = z.object({
   targetRole: z.enum(['viewer', 'editor']),
   password: password.optional(),
+  /** Changes `remember` for the rest of the session; omitted: kept as it was. */
+  remember: z.boolean().optional(),
 });
 
 /** `/api/auth/*`: login, logout, current session and role switch (PLAN.md 4.5). */
@@ -51,8 +61,12 @@ export const authRoutes: FastifyPluginAsync = async (base) => {
         await recordFailure(request, 'login');
         return reply.code(401).send({ error: authMessages.invalidPassword });
       }
-      const session = auth.startSession(reply, role, request.body.remember);
-      return { role: session.role, remember: session.remember } satisfies AuthResponse;
+      const session = auth.startSession(reply, {
+        role,
+        remember: request.body.remember,
+        editorUnlocked: role === 'editor',
+      });
+      return authResponse(session);
     },
   );
 
@@ -64,7 +78,7 @@ export const authRoutes: FastifyPluginAsync = async (base) => {
   app.get('/auth/me', { config: { access: 'public' } }, async (request, reply) => {
     const session = request.session;
     if (!session) return reply.code(401).send({ error: authMessages.unauthorized });
-    return { role: session.role, remember: session.remember } satisfies AuthResponse;
+    return authResponse(session);
   });
 
   app.post(
@@ -75,7 +89,8 @@ export const authRoutes: FastifyPluginAsync = async (base) => {
       const current = request.session!;
       const { targetRole } = request.body;
 
-      if (targetRole === 'editor' && current.role !== 'editor') {
+      // Once the editor password was given, it is not asked again in this session.
+      if (targetRole === 'editor' && !current.editorUnlocked) {
         if (await rejectIfLimited(request, reply)) return reply;
         const ok = await auth.verifyEditorPassword(request.body.password ?? '');
         if (!ok) {
@@ -85,9 +100,12 @@ export const authRoutes: FastifyPluginAsync = async (base) => {
         }
       }
 
-      // `remember` stays as it was at login.
-      const session = auth.startSession(reply, targetRole, current.remember);
-      return { role: session.role, remember: session.remember } satisfies AuthResponse;
+      const session = auth.startSession(reply, {
+        role: targetRole,
+        remember: request.body.remember ?? current.remember,
+        editorUnlocked: current.editorUnlocked || targetRole === 'editor',
+      });
+      return authResponse(session);
     },
   );
 };

@@ -298,6 +298,15 @@ export function RacesPage() {
             <Accordion
               variant="separated"
               chevronPosition="left"
+              // Each item sits in its own sortable wrapper, so Mantine's "item + item" margin
+              // never applies; space the wrappers here instead.
+              styles={{
+                root: {
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--mantine-spacing-sm)',
+                },
+              }}
               value={opened}
               onChange={(value) => setSearch({ event: value })}
             >

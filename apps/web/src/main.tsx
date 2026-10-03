@@ -17,7 +17,27 @@ import { router } from './router';
 
 dayjs.locale('pl');
 
-const theme = createTheme({ primaryColor: 'blue' });
+const theme = createTheme({
+  primaryColor: 'green',
+  // Darker shades keep white text on filled buttons readable.
+  primaryShade: { light: 8, dark: 8 },
+  defaultRadius: 'md',
+  colors: {
+    // Mantine's dark greys with a slight green tint.
+    dark: [
+      '#c8d0ca',
+      '#b2bcb5',
+      '#7e8a82',
+      '#647069',
+      '#3e4943',
+      '#36403a',
+      '#29322d',
+      '#202823',
+      '#1b221e',
+      '#121814',
+    ],
+  },
+});
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } },
 });

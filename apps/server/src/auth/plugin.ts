@@ -12,6 +12,7 @@ import {
   needsRenewal,
   REMEMBER_TTL_S,
   type Session,
+  type SessionGrant,
   type SessionKeys,
   type SessionRole,
 } from './session';
@@ -35,7 +36,7 @@ export type Auth = {
   /** Role matching the password (editor checked first), or null. */
   matchPassword: (password: string) => Promise<SessionRole | null>;
   verifyEditorPassword: (password: string) => Promise<boolean>;
-  startSession: (reply: FastifyReply, role: SessionRole, remember: boolean) => Session;
+  startSession: (reply: FastifyReply, grant: SessionGrant) => Session;
   endSession: (reply: FastifyReply) => void;
   /** Rate-limit key for the client. */
   limiterKey: (request: FastifyRequest) => string;
@@ -109,8 +110,8 @@ export const authPlugin = fp<AuthOptions>(
       verifyEditorPassword: async (password) =>
         Boolean(config.editorPasswordHash) &&
         (await verifySecret(password, config.editorPasswordHash!)),
-      startSession: (reply, role, remember) => {
-        const session = createSession(role, remember, config.sessionSecretVersion);
+      startSession: (reply, grant) => {
+        const session = createSession(grant, config.sessionSecretVersion);
         setCookie(reply, session);
         return session;
       },
@@ -169,10 +170,7 @@ export const authPlugin = fp<AuthOptions>(
       if (cookie && !session) auth.endSession(reply);
       if (session && needsRenewal(session)) {
         // Sliding expiry: an active user is never logged out by the TTL.
-        Object.assign(
-          session,
-          createSession(session.role, session.remember, session.secretVersion),
-        );
+        Object.assign(session, createSession(session, session.secretVersion));
         setCookie(reply, session);
       }
       request.session = session;

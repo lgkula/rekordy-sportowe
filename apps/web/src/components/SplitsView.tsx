@@ -36,7 +36,7 @@ export function SplitsView({ splits }: { splits: readonly Split[] }) {
         h={180}
         data={data}
         dataKey="km"
-        series={[{ name: 'speed', label: s.chartPace, color: 'blue.6' }]}
+        series={[{ name: 'speed', label: s.chartPace, color: 'green.7' }]}
         valueFormatter={(speed) => `${paceLabel(speed)} /km`}
         yAxisProps={{ domain }}
         withYAxis={false}

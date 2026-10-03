@@ -67,7 +67,8 @@ async function loginAs(app: FastifyInstance, role: SessionRole, remember = false
 }
 
 function cookieFor(role: SessionRole, iat: number, secretVersion = 1, remember = false) {
-  const session = createSession(role, remember, secretVersion, iat);
+  const grant = { role, remember, editorUnlocked: role === 'editor' };
+  const session = createSession(grant, secretVersion, iat);
   const value = encodeSession(session, { secret: SESSION_SECRET, secretVersion });
   return { cookie: `${SESSION_COOKIE}=${value}` };
 }
@@ -77,7 +78,7 @@ describe('POST /api/auth/login', () => {
     const app = await createApp();
     const res = await login(app, VIEWER_PASSWORD);
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ role: 'viewer', remember: false });
+    expect(res.json()).toEqual({ role: 'viewer', remember: false, editorUnlocked: false });
     const cookie = sessionCookie(res)!;
     expect(cookie).toMatchObject({ httpOnly: true, secure: true, sameSite: 'Strict', path: '/' });
     expect(cookie.maxAge).toBeUndefined();
@@ -87,7 +88,7 @@ describe('POST /api/auth/login', () => {
   it('gives the editor role for the editor password, with a 90-day cookie when remembered', async () => {
     const app = await createApp();
     const res = await login(app, EDITOR_PASSWORD, true);
-    expect(res.json()).toEqual({ role: 'editor', remember: true });
+    expect(res.json()).toEqual({ role: 'editor', remember: true, editorUnlocked: true });
     expect(sessionCookie(res)!.maxAge).toBe(REMEMBER_TTL_S);
   });
 
@@ -177,7 +178,7 @@ describe('GET /api/auth/me', () => {
     const app = await createApp();
     const headers = await loginAs(app, 'editor', true);
     const res = await app.inject({ url: '/api/auth/me', headers });
-    expect(res.json()).toEqual({ role: 'editor', remember: true });
+    expect(res.json()).toEqual({ role: 'editor', remember: true, editorUnlocked: true });
   });
 });
 
@@ -223,7 +224,7 @@ describe('POST /api/auth/switch', () => {
 
     const res = await switchTo(app, headers, 'editor', EDITOR_PASSWORD);
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ role: 'editor', remember: true });
+    expect(res.json()).toEqual({ role: 'editor', remember: true, editorUnlocked: true });
     expect(sessionCookie(res)!.maxAge).toBe(REMEMBER_TTL_S);
   });
 
@@ -231,13 +232,50 @@ describe('POST /api/auth/switch', () => {
     const app = await createApp();
     const headers = await loginAs(app, 'editor');
     const res = await switchTo(app, headers, 'viewer');
-    expect(res.json()).toEqual({ role: 'viewer', remember: false });
+    expect(res.json()).toEqual({ role: 'viewer', remember: false, editorUnlocked: true });
     expect(sessionCookie(res)!.maxAge).toBeUndefined();
 
     const viewer = { cookie: `${SESSION_COOKIE}=${sessionCookie(res)!.value}` };
     expect(
       (await app.inject({ method: 'POST', url: '/api/probe', headers: viewer })).statusCode,
     ).toBe(403);
+  });
+
+  it('switches back to editor without a password once unlocked in this session', async () => {
+    const app = await createApp();
+    const editor = await loginAs(app, 'editor');
+    const toViewer = await switchTo(app, editor, 'viewer');
+    const viewer = { cookie: `${SESSION_COOKIE}=${sessionCookie(toViewer)!.value}` };
+
+    const back = await switchTo(app, viewer, 'editor');
+    expect(back.statusCode).toBe(200);
+    expect(back.json()).toEqual({ role: 'editor', remember: false, editorUnlocked: true });
+  });
+
+  it('keeps asking a viewer who logged in with the viewer password', async () => {
+    const app = await createApp();
+    const viewer = await loginAs(app, 'viewer');
+    expect((await switchTo(app, viewer, 'editor')).statusCode).toBe(403);
+    const unlocked = await switchTo(app, viewer, 'editor', EDITOR_PASSWORD);
+    const back = await switchTo(
+      app,
+      { cookie: `${SESSION_COOKIE}=${sessionCookie(unlocked)!.value}` },
+      'viewer',
+    );
+    expect(back.json()).toEqual({ role: 'viewer', remember: false, editorUnlocked: true });
+  });
+
+  it('changes `remember` when the switch asks for it', async () => {
+    const app = await createApp();
+    const viewer = await loginAs(app, 'viewer');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/switch',
+      headers: viewer,
+      payload: { targetRole: 'editor', password: EDITOR_PASSWORD, remember: true },
+    });
+    expect(res.json()).toEqual({ role: 'editor', remember: true, editorUnlocked: true });
+    expect(sessionCookie(res)!.maxAge).toBe(REMEMBER_TTL_S);
   });
 
   it('counts wrong editor passwords towards the rate limit', async () => {
@@ -324,7 +362,7 @@ describe('role guards', () => {
       url: '/api/auth/me',
       headers: { cookie: `${SESSION_COOKIE}=${renewed.value}` },
     });
-    expect(me.json()).toEqual({ role: 'viewer', remember: true });
+    expect(me.json()).toEqual({ role: 'viewer', remember: true, editorUnlocked: false });
   });
 
   it('still returns JSON 404 for unknown API routes', async () => {

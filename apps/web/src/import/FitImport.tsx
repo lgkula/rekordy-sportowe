@@ -346,7 +346,7 @@ export function FitImport() {
                       key={item.key}
                       onClick={reviewable ? () => setSelectedKey(item.key) : undefined}
                       style={{ cursor: reviewable ? 'pointer' : undefined }}
-                      bg={item === current ? 'var(--mantine-color-blue-light)' : undefined}
+                      bg={item === current ? 'var(--mantine-primary-color-light)' : undefined}
                     >
                       <Table.Td>
                         {item.file.name}

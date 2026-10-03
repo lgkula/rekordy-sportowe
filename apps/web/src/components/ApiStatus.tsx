@@ -1,30 +1,40 @@
-import { Badge, Tooltip } from '@mantine/core';
+import { Badge, ColorSwatch, Tooltip, type MantineColor } from '@mantine/core';
 import { useHealth } from '../api/health';
 import { pl } from '../i18n/pl';
 
 export function ApiStatus() {
   const { data, isPending, isError } = useHealth();
 
+  let color: MantineColor;
+  let label: string;
   if (isPending) {
-    return (
-      <Badge variant="light" color="gray">
-        {pl.apiStatus.checking}
-      </Badge>
-    );
+    color = 'gray';
+    label = pl.apiStatus.checking;
+  } else if (isError) {
+    color = 'red';
+    label = pl.apiStatus.offline;
+  } else {
+    const ok = data.status === 'ok';
+    color = ok ? 'green' : 'orange';
+    label = ok ? pl.apiStatus.ok : pl.apiStatus.degraded;
   }
-  if (isError) {
-    return (
-      <Badge variant="light" color="red">
-        {pl.apiStatus.offline}
-      </Badge>
-    );
-  }
-  const ok = data.status === 'ok';
+
   return (
-    <Tooltip label={`v${data.version}`}>
-      <Badge variant="light" color={ok ? 'green' : 'orange'}>
-        {ok ? pl.apiStatus.ok : pl.apiStatus.degraded}
-      </Badge>
+    <Tooltip label={data ? `${label} · v${data.version}` : label}>
+      <div>
+        <Badge variant="light" color={color} visibleFrom="sm">
+          {label}
+        </Badge>
+        {/* On a phone only a dot, so the role badge fits in the header. */}
+        <ColorSwatch
+          hiddenFrom="sm"
+          size={12}
+          color={`var(--mantine-color-${color}-6)`}
+          withShadow={false}
+          role="img"
+          aria-label={label}
+        />
+      </div>
     </Tooltip>
   );
 }

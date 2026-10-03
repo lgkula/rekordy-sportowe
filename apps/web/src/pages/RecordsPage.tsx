@@ -1,4 +1,5 @@
 import {
+  ActionIcon,
   Alert,
   Anchor,
   Button,
@@ -14,8 +15,11 @@ import {
   Text,
   TextInput,
   Title,
+  Tooltip,
 } from '@mantine/core';
+import { useLocalStorage } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
+import { IconLayoutColumns, IconLayoutRows } from '@tabler/icons-react';
 import {
   DISTANCES,
   ENABLED_SPORTS,
@@ -86,7 +90,7 @@ function DistanceCard({
         {pl.distances[distanceKey]}
       </Title>
       {/* On a phone the date moves under the activity name, so the table fits without scrolling. */}
-      <Table.ScrollContainer minWidth={canEdit ? 560 : 300}>
+      <Table.ScrollContainer minWidth={canEdit ? 520 : 300}>
         <Table verticalSpacing="xs" fz="sm">
           <Table.Thead>
             <Table.Tr>
@@ -170,6 +174,17 @@ function DistanceCard({
   );
 }
 
+type CardLayout = 'stacked' | 'sideBySide';
+
+/** Distance cards one under another or two per row (from lg up); remembered per browser. */
+function useCardLayout() {
+  return useLocalStorage<CardLayout>({
+    key: 'rs.records.layout',
+    defaultValue: 'sideBySide',
+    getInitialValueInEffect: false,
+  });
+}
+
 /** `/records`: the top 3 per distance for each sport (PLAN.md 4.2, 8). The default page. */
 export function RecordsPage() {
   const [params, setParams] = useSearchParams();
@@ -178,6 +193,10 @@ export function RecordsPage() {
   const query = useRecords(sport);
   const [toEdit, setToEdit] = useState<Selected | null>(null);
   const [toDelete, setToDelete] = useState<Selected | null>(null);
+  const [layout, setLayout] = useCardLayout();
+  const stacked = layout === 'stacked';
+  const layoutLabel = stacked ? r.layout.toSideBySide : r.layout.toStacked;
+  const LayoutIcon = stacked ? IconLayoutColumns : IconLayoutRows;
 
   let body: ReactNode;
   if (query.isPending) {
@@ -192,7 +211,7 @@ export function RecordsPage() {
     body = <Text c="dimmed">{r.empty}</Text>;
   } else {
     body = (
-      <SimpleGrid cols={{ base: 1, xl: 2 }} spacing="md">
+      <SimpleGrid cols={stacked ? 1 : { base: 1, lg: 2 }} spacing="md">
         {query.data.distances.map((records) => (
           <DistanceCard
             key={records.distanceKey}
@@ -208,7 +227,21 @@ export function RecordsPage() {
 
   return (
     <Stack>
-      <Title order={2}>{pl.pages.records.title}</Title>
+      <Group justify="space-between" align="center">
+        <Title order={2}>{pl.pages.records.title}</Title>
+        {/* Below lg the cards are always stacked, so the switch is hidden there. */}
+        <Tooltip label={layoutLabel} withArrow>
+          <ActionIcon
+            variant="light"
+            size="lg"
+            visibleFrom="lg"
+            aria-label={layoutLabel}
+            onClick={() => setLayout(stacked ? 'sideBySide' : 'stacked')}
+          >
+            <LayoutIcon size={20} stroke={1.7} />
+          </ActionIcon>
+        </Tooltip>
+      </Group>
       <Tabs
         value={sport}
         onChange={(value) =>

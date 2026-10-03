@@ -11,6 +11,11 @@ export type Session = {
   role: SessionRole;
   /** "Zapamiętaj w tej przeglądarce": persistent cookie instead of a browser-session one. */
   remember: boolean;
+  /**
+   * The editor password was given in this session (login or switch). Survives a switch to
+   * viewer, so switching back to editor needs no password until logout or expiry.
+   */
+  editorUnlocked: boolean;
   /** Issued at (unix seconds). */
   iat: number;
   /** Expires at (unix seconds). */
@@ -18,6 +23,9 @@ export type Session = {
   /** `SESSION_SECRET_VERSION` at issue time; bumping it invalidates every session. */
   secretVersion: number;
 };
+
+/** What a session grants, without its timestamps. */
+export type SessionGrant = Pick<Session, 'role' | 'remember' | 'editorUnlocked'>;
 
 export type SessionKeys = { secret: string; secretVersion: number };
 
@@ -35,13 +43,9 @@ export function ttlFor(remember: boolean): number {
   return remember ? REMEMBER_TTL_S : SESSION_TTL_S;
 }
 
-export function createSession(
-  role: SessionRole,
-  remember: boolean,
-  secretVersion: number,
-  now = nowS(),
-): Session {
-  return { role, remember, iat: now, exp: now + ttlFor(remember), secretVersion };
+export function createSession(grant: SessionGrant, secretVersion: number, now = nowS()): Session {
+  const { role, remember, editorUnlocked } = grant;
+  return { role, remember, editorUnlocked, iat: now, exp: now + ttlFor(remember), secretVersion };
 }
 
 function sign(encodedPayload: string, secret: string): Buffer {
@@ -52,6 +56,7 @@ export function encodeSession(session: Session, keys: SessionKeys): string {
   const payload = {
     r: session.role,
     m: session.remember ? 1 : 0,
+    u: session.editorUnlocked ? 1 : 0,
     i: session.iat,
     e: session.exp,
     v: session.secretVersion,
@@ -81,12 +86,14 @@ export function decodeSession(
     return null;
   }
   if (typeof payload !== 'object' || payload === null) return null;
-  const { r, m, i, e, v } = payload as Record<string, unknown>;
+  const { r, m, u, i, e, v } = payload as Record<string, unknown>;
   if (r !== 'viewer' && r !== 'editor') return null;
   if (typeof i !== 'number' || typeof e !== 'number' || typeof v !== 'number') return null;
   if (v !== keys.secretVersion || e <= now) return null;
 
-  return { role: r, remember: m === 1, iat: i, exp: e, secretVersion: v };
+  // An editor session is unlocked by definition (also for cookies issued before the flag).
+  const editorUnlocked = r === 'editor' || u === 1;
+  return { role: r, remember: m === 1, editorUnlocked, iat: i, exp: e, secretVersion: v };
 }
 
 export function needsRenewal(session: Session, now = nowS()): boolean {

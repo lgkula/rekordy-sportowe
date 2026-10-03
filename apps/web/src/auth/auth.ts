@@ -4,7 +4,8 @@ import { pl } from '../i18n/pl';
 import { defaultPath } from '../navigation';
 
 export type Role = 'viewer' | 'editor';
-export type Me = { role: Role; remember: boolean };
+/** `editorUnlocked`: the editor password was given in this session, a switch back needs none. */
+export type Me = { role: Role; remember: boolean; editorUnlocked: boolean };
 
 export const meQueryKey = ['auth', 'me'] as const;
 
@@ -44,7 +45,7 @@ export function useLogin() {
 export function useSwitchRole() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { targetRole: Role; password?: string }) =>
+    mutationFn: (body: { targetRole: Role; password?: string; remember?: boolean }) =>
       apiFetch<Me>('/api/auth/switch', { method: 'POST', body }),
     onSuccess: (me) => queryClient.setQueryData(meQueryKey, me),
   });

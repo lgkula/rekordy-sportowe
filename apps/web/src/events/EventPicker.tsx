@@ -168,7 +168,7 @@ export function EventPicker({
       )}
 
       {askRename !== null && onRename && (
-        <Paper withBorder p="xs" bg="var(--mantine-color-blue-light)">
+        <Paper withBorder p="xs" bg="var(--mantine-primary-color-light)">
           <Group gap="xs" justify="space-between">
             <Text size="sm">{t(p.renameQuestion, { name: askRename })}</Text>
             <Group gap={6}>
