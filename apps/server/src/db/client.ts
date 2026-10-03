@@ -19,6 +19,10 @@ export function connectionOptions(config: Config): mysql.ConnectionOptions {
     password: config.db.password,
     database: config.db.database,
     timezone: 'Z',
+    // MariaDB ≥ 10.5 marks JSON columns in its metadata and mysql2 would parse them, while
+    // 10.4 sends plain text. Raw strings everywhere; the schema's `jsonText` parses them
+    // (otherwise a JSON string value such as "name" would be parsed twice).
+    jsonStrings: true,
     charset: 'utf8mb4_unicode_ci',
     connectTimeout: 5000,
   };

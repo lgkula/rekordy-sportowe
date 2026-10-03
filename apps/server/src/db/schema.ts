@@ -19,8 +19,9 @@ import {
 } from 'drizzle-orm/mysql-core';
 
 /**
- * JSON column that also works on MariaDB, where JSON is an alias of LONGTEXT and the driver
- * returns the raw string (Drizzle's `json` only parses MySQL's native JSON type).
+ * JSON column that also works on MariaDB, where JSON is an alias of LONGTEXT (Drizzle's `json`
+ * only parses MySQL's native JSON type). The pool reads JSON as raw strings (`jsonStrings`),
+ * so values are parsed here, also a JSON string such as `"manual"`.
  */
 const jsonText = <T>(name: string) =>
   customType<{ data: T; driverData: string }>({
