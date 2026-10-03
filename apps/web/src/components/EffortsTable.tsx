@@ -1,4 +1,4 @@
-import { Table, Text, Tooltip } from '@mantine/core';
+import { Table, Text } from '@mantine/core';
 import {
   formatDistance,
   formatDuration,
@@ -8,6 +8,7 @@ import {
 } from '@rekordy/core';
 import { pl } from '../i18n/pl';
 import { t } from '../i18n/template';
+import { TapTooltip } from './TapTooltip';
 
 type EffortRow = Pick<
   EffortValues,
@@ -36,11 +37,11 @@ export function EffortsTable({ efforts }: { efforts: readonly EffortRow[] }) {
             <Table.Td>{pl.distances[effort.distanceKey as DistanceKey]}</Table.Td>
             <Table.Td>
               {effort.isTolerance ? (
-                <Tooltip
+                <TapTooltip
                   label={t(e.tolerance, { distance: formatDistance(effort.actualDistanceM) })}
                 >
-                  <span>{formatPace(effort.paceSPerKm, { unit: true })} *</span>
-                </Tooltip>
+                  {formatPace(effort.paceSPerKm, { unit: true })} *
+                </TapTooltip>
               ) : (
                 formatPace(effort.paceSPerKm, { unit: true })
               )}

@@ -22,6 +22,7 @@ export const VALIDATION_CODES = [
   'elapsed_lt_duration',
   'distance_not_for_sport',
   'effort_distance_too_short',
+  'effort_distance_out_of_range',
   'invalid_split',
 ] as const;
 export type ValidationCode = (typeof VALIDATION_CODES)[number];
@@ -315,14 +316,21 @@ export const effortSchema = z.object({
 });
 export type Effort = z.infer<typeof effortSchema>;
 
-/** Editing a result by hand (Part 4): the time and/or the distance it covers. */
+/**
+ * Editing a result by hand (PLAN.md 4.2): the time and/or the distance it covers, and the
+ * link of its activity. Changing the time or the distance marks the result as edited, so
+ * recomputation keeps it; the new values must still qualify (`editedEffort`).
+ */
 export const effortPatchSchema = z
   .object({
     durationS: durationSSchema,
     actualDistanceM: distanceMSchema,
+    activityUrl: urlOrNull,
   })
-  .partial();
-export type EffortPatch = z.infer<typeof effortPatchSchema>;
+  .partial()
+  .refine((patch) => Object.values(patch).some((v) => v !== undefined), { error: 'required' });
+export type EffortPatchInput = z.input<typeof effortPatchSchema>;
+export type EffortPatch = z.output<typeof effortPatchSchema>;
 
 export type ActivityDetail = ActivityListItem & {
   elapsedS: number | null;

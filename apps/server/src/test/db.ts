@@ -25,9 +25,10 @@ export async function openTestDatabase(): Promise<Database> {
   return createDatabase(config);
 }
 
-/** Removes all activities and everything that hangs off them. */
+/** Removes all activities, everything that hangs off them, and maintenance jobs. */
 export async function clearActivityData(database: Database): Promise<void> {
   for (const table of [
+    'jobs',
     'import_items',
     'import_batches',
     'efforts',

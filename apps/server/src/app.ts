@@ -10,8 +10,10 @@ import {
 import { authPlugin, type AuthOptions } from './auth/plugin';
 import type { Db } from './db/client';
 import { activityRoutes } from './routes/activities';
+import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { importRoutes } from './routes/imports';
+import { recordRoutes } from './routes/records';
 import { healthRoutes, type HealthDeps } from './routes/health';
 
 export type BuildAppOptions = {
@@ -44,7 +46,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     async (api) => {
       await api.register(healthRoutes(options.health));
       await api.register(authRoutes);
-      if (options.db) await api.register(activityRoutes(options.db));
+      if (options.db) {
+        await api.register(activityRoutes(options.db));
+        await api.register(recordRoutes(options.db));
+        await api.register(adminRoutes(options.db));
+      }
       if (options.db && options.storageDir) {
         await api.register(importRoutes(options.db, options.storageDir));
       }

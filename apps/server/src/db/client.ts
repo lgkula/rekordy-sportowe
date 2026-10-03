@@ -33,6 +33,13 @@ export function createDatabase(config: Config): Database {
     idleTimeout: 60_000,
     enableKeepAlive: true,
   });
+  // TIMESTAMP columns are converted through the session time zone. The driver reads and
+  // writes them as UTC (`timezone: 'Z'`), so the session must be UTC as well; otherwise
+  // `DEFAULT now()` values read back shifted and dates written from JS are stored shifted
+  // (the server's system zone is Europe/Warsaw locally and unknown on the host).
+  pool.on('connection', (connection) => {
+    connection.query("SET time_zone = '+00:00'");
+  });
   const db = drizzle(pool, { schema, mode: 'default' });
   return { db, pool, close: () => pool.end() };
 }

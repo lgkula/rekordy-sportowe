@@ -78,6 +78,20 @@ export function effortFromTotals(
   return withinTolerance ? effort(distanceKey, distanceM, durationS, true) : null;
 }
 
+/**
+ * A result changed by hand on the records page: the time over `actualDistanceM`. The totals
+ * rule applies (PLAN.md Q8): a distance up to 1% over the target is a full result with the
+ * time scaled to the target, a distance in the tolerance band a tolerance result (targets
+ * > 1 km only). Null when the distance cannot give a result for the target.
+ */
+export function editedEffort(
+  distanceKey: DistanceKey,
+  actualDistanceM: number,
+  durationS: number,
+): EffortValues | null {
+  return effortFromTotals(distanceKey, actualDistanceM, durationS);
+}
+
 /** All results of an activity without a stream, one per record distance of its sport. */
 export function effortsFromTotals(
   sport: Sport,

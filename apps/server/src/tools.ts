@@ -1,6 +1,7 @@
 import { runHashSecret } from './auth/hashSecretCommand';
 import { loadConfig } from './config';
 import { runMigrations } from './db/migrations';
+import { runRecomputeAll } from './jobs/recomputeAllCommand';
 
 /**
  * Maintenance CLI, run over SSH from the application root:
@@ -20,6 +21,10 @@ const commands: Record<string, { description: string; run: (args: string[]) => P
       if (status.pending.length) process.exitCode = 1;
     },
   },
+  'recompute-all': {
+    description: 'Recompute the efforts of every activity (resumes an interrupted run)',
+    run: runRecomputeAll,
+  },
   'hash-secret': {
     description: 'Generate password hashes, agent token and session secret (--help)',
     run: runHashSecret,
@@ -29,7 +34,7 @@ const commands: Record<string, { description: string; run: (args: string[]) => P
 function printHelp(): void {
   console.log('Usage: node dist/tools.cjs <command>\n\nCommands:');
   for (const [name, { description }] of Object.entries(commands)) {
-    console.log(`  ${name.padEnd(12)} ${description}`);
+    console.log(`  ${name.padEnd(14)} ${description}`);
   }
 }
 

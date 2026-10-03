@@ -175,6 +175,14 @@ Otwórz https://sport.kula.opole.pl/api/health:
   `ssh seohost "cd ~/nodejsapp/rekordy-sportowe && /opt/alt/alt-nodejs22/root/usr/bin/node dist/tools.cjs migrate"`
 - `storage.writable: false`: brak uprawnień do katalogu `storage/`.
 
+## Przeliczenie wszystkich rekordów
+
+Potrzebne np. po zmianie reguł liczenia rekordów. Wyniki poprawione ręcznie, wpisane ręcznie i usunięte zostają bez zmian.
+
+- W aplikacji: **Administracja → Przelicz wszystkie rekordy** (tryb edycji). Jeśli zamkniesz stronę w trakcie, przycisk zmieni się na „Wznów”.
+- Przez SSH (to samo zadanie, wznawia przerwane):
+  `ssh seohost "cd ~/nodejsapp/rekordy-sportowe && /opt/alt/alt-nodejs22/root/usr/bin/node dist/tools.cjs recompute-all"`
+
 ## Wdrażanie z GitHub Actions (opcjonalne)
 
 Workflow **Deploy** uruchamiasz ręcznie. Używa **osobnego klucza** (nie Twojego prywatnego).

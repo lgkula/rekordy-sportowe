@@ -13,6 +13,7 @@ import {
 } from '@rekordy/core';
 import { asc, count, desc, eq, type SQL } from 'drizzle-orm';
 import type { Db } from '../db/client';
+import { isDuplicateEntry } from '../db/errors';
 import { activities, activityStreams, efforts } from '../db/schema';
 import { findHardDuplicate, findSimilarActivities } from './duplicates';
 import { getManualEffortInput, recomputeEfforts, setManualEffort } from './efforts';
@@ -119,11 +120,6 @@ export function fromCreateInput(input: ActivityCreate): {
     },
     manualEffort: null,
   };
-}
-
-function isDuplicateEntry(error: unknown): boolean {
-  const e = error as { code?: string; cause?: { code?: string } };
-  return e.code === 'ER_DUP_ENTRY' || e.cause?.code === 'ER_DUP_ENTRY';
 }
 
 export type CreateResult = { ok: true; id: number } | { ok: false; conflict: DuplicateConflict };

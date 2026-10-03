@@ -10,11 +10,13 @@ import { ActivityFormPage } from './pages/ActivityFormPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
+import { RecordsPage } from './pages/RecordsPage';
 
 // Pages with charts and the FIT import load on demand, keeping the main bundle small.
 const ActivityDetailPage = lazy(() =>
   import('./pages/ActivityDetailPage').then((m) => ({ default: m.ActivityDetailPage })),
 );
+const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })));
 const ImportPage = lazy(() =>
   import('./pages/ImportPage').then((m) => ({ default: m.ImportPage })),
 );
@@ -43,7 +45,7 @@ export const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <Navigate to={defaultPath} replace /> },
-      { path: 'records', element: <PlaceholderPage title={pl.pages.records.title} /> },
+      { path: 'records', element: <RecordsPage /> },
       { path: 'races', element: <PlaceholderPage title={pl.pages.races.title} /> },
       { path: 'activities', element: <ActivitiesPage /> },
       {
@@ -76,6 +78,16 @@ export const router = createBrowserRouter([
           <EditorOnly>
             <Lazy>
               <ImportPage />
+            </Lazy>
+          </EditorOnly>
+        ),
+      },
+      {
+        path: 'admin',
+        element: (
+          <EditorOnly>
+            <Lazy>
+              <AdminPage />
             </Lazy>
           </EditorOnly>
         ),

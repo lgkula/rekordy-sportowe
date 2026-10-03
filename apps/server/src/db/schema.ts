@@ -148,6 +148,36 @@ export const efforts = mysqlTable(
   ],
 );
 
+/**
+ * Long maintenance jobs (e.g. recompute all efforts), processed in chunks by separate requests
+ * so that a Passenger process stopped mid-way loses nothing (PLAN.md 3.2). The next chunk
+ * resumes after `cursor`.
+ */
+export const jobs = mysqlTable(
+  'jobs',
+  {
+    id: int('id').autoincrement().primaryKey(),
+    type: varchar('type', { length: 50 }).notNull(),
+    status: mysqlEnum('status', ['running', 'done']).notNull().default('running'),
+    /** Set to the type while running: at most one running job per type (UNIQUE, NULLs allowed). */
+    activeKey: varchar('active_key', { length: 50 }),
+    total: int('total').notNull().default(0),
+    processed: int('processed').notNull().default(0),
+    /** Last processed item (activity id). */
+    cursor: int('cursor_id').notNull().default(0),
+    /** A chunk is being processed until this time (ms since epoch); stale leases expire. */
+    leaseUntilMs: bigint('lease_until_ms', { mode: 'number' }),
+    error: text('error'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
+    finishedAt: timestamp('finished_at'),
+  },
+  (t) => [
+    uniqueIndex('jobs_active_key_uq').on(t.activeKey),
+    index('jobs_type_created_idx').on(t.type, t.createdAt),
+  ],
+);
+
 export const IMPORT_SOURCES = ['fit', 'strava_export', 'garmin_export', 'agent'] as const;
 
 export const importBatches = mysqlTable('import_batches', {

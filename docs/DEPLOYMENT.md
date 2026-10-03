@@ -64,6 +64,13 @@ Overrides via env: `DEPLOY_SSH_HOST`, `DEPLOY_APP_ROOT`, `DEPLOY_NODE_BIN`, `DEP
 - Applied by the deploy script over SSH. Passenger workers never migrate.
 - At startup the server logs an error if migrations are pending, and `/api/health` returns 503 with `migrations.pending`.
 
+## Recompute all records
+
+After a change of the records rules, recompute the efforts of every activity (edited, hand-entered and deleted results are kept):
+
+- In the app: **Administracja → Przelicz wszystkie rekordy** (editor). The job runs in short chunks, one request each, with progress in the `jobs` table; closing the page leaves it resumable ("Wznów").
+- Over SSH: `node dist/tools.cjs recompute-all` (same job: it resumes a run interrupted in the browser, and waits while the page is processing a chunk).
+
 ## Health endpoint
 
 `GET /api/health` (public) → 200 `{status:"ok", version, node, uptimeS, db, migrations, storage, auth}`, or 503 with `status:"degraded"` when the DB is unreachable, migrations are pending, `storage/` is not writable, or the auth secrets are missing (`auth.configured: false`).

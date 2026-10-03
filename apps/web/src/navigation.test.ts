@@ -10,6 +10,7 @@ describe('navigation', () => {
       'Zawody',
       'Aktywności',
       'Import',
+      'Administracja',
     ]);
   });
 

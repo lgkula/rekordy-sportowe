@@ -8,6 +8,7 @@ export const navItems: readonly NavItem[] = [
   { path: '/races', label: pl.nav.races },
   { path: '/activities', label: pl.nav.activities },
   { path: '/import', label: pl.nav.import, editorOnly: true },
+  { path: '/admin', label: pl.nav.admin, editorOnly: true },
 ];
 
 export const defaultPath = '/records';
