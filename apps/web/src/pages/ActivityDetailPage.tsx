@@ -19,6 +19,7 @@ import { useCanEdit } from '../auth/auth';
 import { EffortsTable } from '../components/EffortsTable';
 import { SplitsView } from '../components/SplitsView';
 import { pl } from '../i18n/pl';
+import { t } from '../i18n/template';
 
 const d = pl.activityDetail;
 
@@ -69,6 +70,16 @@ export function ActivityDetailPage() {
             <Badge variant="light">{pl.sports[activity.sport]}</Badge>
             {activity.isRace && <Badge color="grape">{d.race}</Badge>}
             {activity.isHidden && <Badge color="gray">{d.hidden}</Badge>}
+            {activity.eventId !== null && activity.eventName !== null && (
+              <Anchor
+                component={Link}
+                to={`/races?${new URLSearchParams({ sport: activity.sport, event: `e${activity.eventId}` })}`}
+                size="sm"
+              >
+                {t(d.event, { name: activity.eventName })}
+                {activity.editionLabel && `, ${t(d.edition, { label: activity.editionLabel })}`}
+              </Anchor>
+            )}
             {activity.activityUrl && (
               <Anchor
                 href={activity.activityUrl}

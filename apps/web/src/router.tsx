@@ -3,19 +3,19 @@ import { lazy, Suspense, type ReactNode } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router';
 import { EditorOnly, RequireAuth } from './auth/RequireAuth';
 import { Layout } from './components/Layout';
-import { pl } from './i18n/pl';
 import { defaultPath } from './navigation';
 import { ActivitiesPage } from './pages/ActivitiesPage';
 import { ActivityFormPage } from './pages/ActivityFormPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
-import { PlaceholderPage } from './pages/PlaceholderPage';
 import { RecordsPage } from './pages/RecordsPage';
 
-// Pages with charts and the FIT import load on demand, keeping the main bundle small.
+// Pages with charts, drag and drop and the FIT import load on demand, keeping the main bundle
+// small.
 const ActivityDetailPage = lazy(() =>
   import('./pages/ActivityDetailPage').then((m) => ({ default: m.ActivityDetailPage })),
 );
+const RacesPage = lazy(() => import('./pages/RacesPage').then((m) => ({ default: m.RacesPage })));
 const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })));
 const ImportPage = lazy(() =>
   import('./pages/ImportPage').then((m) => ({ default: m.ImportPage })),
@@ -46,7 +46,14 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <Navigate to={defaultPath} replace /> },
       { path: 'records', element: <RecordsPage /> },
-      { path: 'races', element: <PlaceholderPage title={pl.pages.races.title} /> },
+      {
+        path: 'races',
+        element: (
+          <Lazy>
+            <RacesPage />
+          </Lazy>
+        ),
+      },
       { path: 'activities', element: <ActivitiesPage /> },
       {
         path: 'activities/new',

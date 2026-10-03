@@ -196,6 +196,26 @@ describe.skipIf(!testDbName)('/api/import', () => {
     });
   });
 
+  it('assigns the event chosen in the review, creating it once for several files', async () => {
+    const meta = { ...raceMeta, newEventName: 'Bieg Jesienny', editionLabel: '2026' };
+    const first = await upload({ name: 'race-1.fit', bytes: await fixture('race-1.fit') }, meta);
+    expect(first.statusCode, first.body).toBe(201);
+    const second = await upload(
+      { name: 'race-3.fit', bytes: await fixture('race-3.fit') },
+      { ...meta, editionLabel: 'jesień', confirmDuplicate: true },
+    );
+    expect(second.statusCode, second.body).toBe(201);
+    const [a, b] = [first.json<ActivityDetail>(), second.json<ActivityDetail>()];
+    expect(a).toMatchObject({ eventName: 'Bieg Jesienny', editionLabel: '2026' });
+    expect(b.eventId).toBe(a.eventId);
+
+    const wrongSport = await upload(
+      { name: 'race-2-mountain.fit', bytes: await fixture('race-2-mountain.fit') },
+      { ...raceMeta, sport: 'trail_run', eventId: a.eventId },
+    );
+    expect(wrongSport.statusCode, wrongSport.body).toBe(400);
+  });
+
   it('checks a batch for duplicates by watch ID, file name and hash', async () => {
     const race = await parsed('race-1.fit');
     const training = await parsed('training-1.fit');

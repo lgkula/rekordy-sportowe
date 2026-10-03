@@ -31,6 +31,7 @@ import {
   type ActivityListItem,
   type DuplicateConflict,
   type Sport,
+  type ValidationIssue,
 } from '@rekordy/core';
 import { useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -45,6 +46,8 @@ import {
   type ActivityFormValues,
   type FormMode,
 } from '../activities/form';
+import { NO_EVENT } from '../events/eventChoice';
+import { EventPicker } from '../events/EventPicker';
 import { pl } from '../i18n/pl';
 import { t } from '../i18n/template';
 
@@ -57,6 +60,12 @@ function parsePolishDate(input: string): string | null {
   const [, d, m, y] = match;
   const iso = `${y}-${m!.padStart(2, '0')}-${d!.padStart(2, '0')}`;
   return Number.isNaN(Date.parse(iso)) ? null : iso;
+}
+
+/** Validation issues of a 400 answer. */
+function issuesOf(error: unknown): ValidationIssue[] {
+  if (!(error instanceof ApiError) || error.status !== 400) return [];
+  return (error.body as { issues?: ValidationIssue[] } | null)?.issues ?? [];
 }
 
 function describe(activity: ActivityListItem): string {
@@ -120,6 +129,11 @@ function ActivityForm({ existing }: { existing?: ActivityDetail }) {
         return;
       }
       setFormError(t(pl.activityForm.duplicate, { activity: describe(conflict.activity) }));
+      return;
+    }
+    const eventIssue = issuesOf(error).find((issue) => issue.path[0] === 'eventId');
+    if (eventIssue) {
+      form.setFieldError('eventId', pl.validation[eventIssue.code] ?? pl.validation.generic);
       return;
     }
     setFormError(pl.activityForm.saveFailed);
@@ -191,6 +205,8 @@ function ActivityForm({ existing }: { existing?: ActivityDetail }) {
               value={form.values.sport}
               onChange={(value) => {
                 const sport = value as Sport;
+                // Events belong to one sport.
+                if (sport !== form.values.sport) form.setFieldValue('event', NO_EVENT);
                 form.setFieldValue('sport', sport);
                 const key = form.values.effortKey;
                 if (key !== '' && !effortKeysFor(sport).includes(key)) {
@@ -293,11 +309,25 @@ function ActivityForm({ existing }: { existing?: ActivityDetail }) {
                   {...form.getInputProps('isHidden', { type: 'checkbox' })}
                 />
               </Group>
-              <TextInput
-                label={f.editionLabel}
-                description={f.editionLabelHint}
-                {...form.getInputProps('editionLabel')}
-              />
+              {form.values.isRace && (
+                <Paper withBorder p="md">
+                  <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                    <EventPicker
+                      sport={form.values.sport}
+                      value={form.values.event}
+                      onChange={(event) => form.setFieldValue('event', event)}
+                      activityName={form.values.name}
+                      onRename={(name) => form.setFieldValue('name', name)}
+                      error={form.errors.eventId as string | undefined}
+                    />
+                    <TextInput
+                      label={f.editionLabel}
+                      description={f.editionLabelHint}
+                      {...form.getInputProps('editionLabel')}
+                    />
+                  </SimpleGrid>
+                </Paper>
+              )}
             </>
           )}
 

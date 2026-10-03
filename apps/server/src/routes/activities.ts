@@ -35,12 +35,17 @@ export const activityRoutes =
     });
 
     app.post('/activities', { schema: { body: activityCreateSchema } }, async (request, reply) => {
-      const { row, manualEffort } = fromCreateInput(request.body);
+      const { row, manualEffort, newEventName } = fromCreateInput(request.body);
       const result = await createActivity(db, row, {
         manualEffort,
+        newEventName,
         confirmDuplicate: request.body.confirmDuplicate,
       });
-      if (!result.ok) return reply.code(409).send(result.conflict);
+      if (!result.ok) {
+        return 'conflict' in result
+          ? reply.code(409).send(result.conflict)
+          : reply.code(400).send({ error: activityMessages.invalid, issues: result.issues });
+      }
       return reply.code(201).send(await getActivityDetail(db, result.id));
     });
 

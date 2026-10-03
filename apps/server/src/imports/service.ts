@@ -4,6 +4,7 @@ import type {
   FitImportMeta,
   ImportCheckItem,
   ImportCheckResult,
+  ValidationIssue,
 } from '@rekordy/core';
 import { parseFit, type FitErrorCode } from '@rekordy/core/fit';
 import { findHardDuplicate, findSimilarActivities } from '../activities/duplicates';
@@ -48,6 +49,7 @@ export async function checkImportItems(
 export type FitImportResult =
   | { ok: true; id: number }
   | { ok: false; reason: 'conflict'; conflict: DuplicateConflict }
+  | { ok: false; reason: 'invalid'; issues: ValidationIssue[] }
   | { ok: false; reason: 'parse'; error: FitErrorCode };
 
 /**
@@ -69,6 +71,7 @@ export async function importFitFile(
   if (!parsed.ok) return { ok: false, reason: 'parse', error: parsed.error };
   const a = parsed.activity;
   const { meta } = input;
+  const newEventName = meta.newEventName ?? null;
 
   const result = await createActivity(
     db,
@@ -83,6 +86,7 @@ export async function importFitFile(
       elevationGainM: a.elevationGainM ?? null,
       isRace: meta.isRace,
       isHidden: meta.isHidden,
+      eventId: newEventName === null ? (meta.eventId ?? null) : null,
       editionLabel: meta.editionLabel ?? null,
       notes: meta.notes ?? null,
       activityUrl: meta.activityUrl ?? null,
@@ -94,11 +98,15 @@ export async function importFitFile(
     },
     {
       confirmDuplicate: meta.confirmDuplicate,
+      newEventName,
       stream: a.stream ?? null,
       beforeInsert: async () => {
         await storeFitFile(input.storageDir, a.localDate, a.fileSha256, input.bytes);
       },
     },
   );
-  return result.ok ? result : { ok: false, reason: 'conflict', conflict: result.conflict };
+  if (result.ok) return result;
+  return 'conflict' in result
+    ? { ok: false, reason: 'conflict', conflict: result.conflict }
+    : { ok: false, reason: 'invalid', issues: result.issues };
 }

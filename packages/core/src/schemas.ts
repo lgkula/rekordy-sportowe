@@ -24,6 +24,8 @@ export const VALIDATION_CODES = [
   'effort_distance_too_short',
   'effort_distance_out_of_range',
   'invalid_split',
+  'event_not_found',
+  'event_not_for_sport',
 ] as const;
 export type ValidationCode = (typeof VALIDATION_CODES)[number];
 
@@ -46,7 +48,7 @@ const localDateSchema = z.iso.date({ error: 'invalid_date' });
 /** ISO timestamp in UTC, e.g. from `Date.toISOString()`. */
 const utcDateTimeSchema = z.iso.datetime({ error: 'invalid_datetime' });
 
-const distanceMSchema = z
+export const distanceMSchema = z
   .number({ error: 'invalid_distance' })
   .positive({ error: 'invalid_distance' })
   .max(MAX_DISTANCE_M, { error: 'invalid_distance' });
@@ -77,6 +79,26 @@ const urlOrNull = z
     z.url({ protocol: /^https?$/, error: 'invalid_url' }).max(500, { error: 'too_long' }),
   ])
   .nullable();
+
+/** Name of an event (a race grouping its editions, PLAN.md 4.3). */
+export const eventNameSchema = z
+  .string({ error: 'required' })
+  .trim()
+  .min(1, { error: 'required' })
+  .max(200, { error: 'too_long' });
+
+const eventIdSchema = z.number().int().positive({ error: 'event_not_found' });
+
+/**
+ * Event assignment of a race activity: an existing event (`eventId`, null = none) or a new
+ * one created with the activity (`newEventName`; an event of the same sport with the same
+ * name is reused instead). Assigning an event marks the activity as a race; an activity that
+ * is not a race belongs to no event.
+ */
+const eventAssignmentFields = {
+  eventId: eventIdSchema.nullable().optional(),
+  newEventName: eventNameSchema.optional(),
+};
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, { error: 'invalid_hash' });
 
@@ -186,6 +208,7 @@ export const activityFullCreateSchema = z
     isRace: z.boolean().default(false),
     isHidden: z.boolean().default(false),
     editionLabel: textOrNull(100).optional(),
+    ...eventAssignmentFields,
     notes: textOrNull(5000).optional(),
     activityUrl: urlOrNull.optional(),
     splits: splitsSchema.nullable().optional(),
@@ -240,6 +263,8 @@ export const activityPatchSchema = z
     isRace: z.boolean(),
     isHidden: z.boolean(),
     editionLabel: textOrNull(100),
+    eventId: eventIdSchema.nullable(),
+    newEventName: eventNameSchema,
     notes: textOrNull(5000),
     activityUrl: urlOrNull,
     splits: splitsSchema.nullable(),
@@ -336,6 +361,8 @@ export type ActivityDetail = ActivityListItem & {
   elapsedS: number | null;
   elevationGainM: number | null;
   eventId: number | null;
+  /** Name of the event the activity belongs to. */
+  eventName: string | null;
   editionLabel: string | null;
   notes: string | null;
   externalId: string | null;
@@ -405,8 +432,8 @@ export const fitImportMetaSchema = z.object({
   isHidden: z.boolean().default(false),
   activityUrl: urlOrNull.optional(),
   notes: textOrNull(5000).optional(),
-  /** Placeholder until events are assigned in the review (Part 5). */
   editionLabel: textOrNull(100).optional(),
+  ...eventAssignmentFields,
   /** Save even though a similar activity exists (fuzzy duplicate, PLAN.md 4.4). */
   confirmDuplicate: z.boolean().optional(),
 });

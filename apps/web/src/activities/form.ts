@@ -14,6 +14,7 @@ import {
   type Sport,
   type ValidationCode,
 } from '@rekordy/core';
+import { choiceOf, eventAssignment, NO_EVENT, type EventChoice } from '../events/eventChoice';
 
 export type FormMode = 'full' | 'simple';
 
@@ -33,6 +34,8 @@ export type ActivityFormValues = {
   elevationGain: string;
   isRace: boolean;
   isHidden: boolean;
+  /** Event and edition label: used only for a race. */
+  event: EventChoice;
   editionLabel: string;
   notes: string;
   activityUrl: string;
@@ -56,6 +59,7 @@ export function emptyFormValues(sport: Sport = ENABLED_SPORTS[0]!): ActivityForm
     elevationGain: '',
     isRace: false,
     isHidden: false,
+    event: NO_EVENT,
     editionLabel: '',
     notes: '',
     activityUrl: '',
@@ -95,6 +99,7 @@ export function detailToFormValues(activity: ActivityDetail): ActivityFormValues
     elevationGain: activity.elevationGainM === null ? '' : String(activity.elevationGainM),
     isRace: activity.isRace,
     isHidden: activity.isHidden,
+    event: choiceOf(activity.eventId, activity.eventName),
     editionLabel: activity.editionLabel ?? '',
     notes: activity.notes ?? '',
     activityUrl: activity.activityUrl ?? '',
@@ -224,7 +229,9 @@ export function parseActivityForm(values: ActivityFormValues, mode: FormMode): F
       ),
       isRace: values.isRace,
       isHidden: values.isHidden,
-      editionLabel: values.editionLabel,
+      // Only a race belongs to an event and has an edition.
+      ...(values.isRace ? eventAssignment(values.event) : { eventId: null }),
+      editionLabel: values.isRace ? values.editionLabel : null,
       notes: values.notes,
       splits:
         values.splits.length === 0
@@ -276,6 +283,7 @@ export function toPatch(input: ActivityCreate): ActivityPatchInput {
     elapsedS: rest.elapsedS ?? null,
     elevationGainM: rest.elevationGainM ?? null,
     editionLabel: rest.editionLabel ?? null,
+    eventId: rest.eventId ?? null,
     notes: rest.notes ?? null,
     activityUrl: rest.activityUrl ?? null,
     splits: rest.splits && rest.splits.length > 0 ? rest.splits : null,

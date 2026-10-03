@@ -82,9 +82,18 @@ export const importRoutes =
         meta: meta.data,
       });
       if (!result.ok) {
-        return result.reason === 'conflict'
-          ? reply.code(409).send(result.conflict)
-          : reply.code(422).send({ error: fitErrorMessages[result.error], code: result.error });
+        switch (result.reason) {
+          case 'conflict':
+            return reply.code(409).send(result.conflict);
+          case 'invalid':
+            return reply
+              .code(400)
+              .send({ error: importMessages.invalidMeta, issues: result.issues });
+          case 'parse':
+            return reply
+              .code(422)
+              .send({ error: fitErrorMessages[result.error], code: result.error });
+        }
       }
       const detail = await getActivityDetail(db, result.id);
       if (!detail) return reply.code(404).send({ error: activityMessages.notFound });

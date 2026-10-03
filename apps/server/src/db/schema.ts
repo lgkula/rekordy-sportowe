@@ -9,7 +9,6 @@ import {
   decimal,
   index,
   int,
-  json,
   mysqlEnum,
   mysqlTable,
   text,
@@ -41,7 +40,7 @@ const seconds = metres;
 /** Key/value application settings (e.g. `events.ordering.road_run`). */
 export const settings = mysqlTable('settings', {
   key: varchar('key', { length: 100 }).primaryKey(),
-  value: json('value').notNull(),
+  value: jsonText<unknown>('value').notNull(),
   updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
 });
 

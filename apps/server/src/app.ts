@@ -12,6 +12,7 @@ import type { Db } from './db/client';
 import { activityRoutes } from './routes/activities';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
+import { eventRoutes } from './routes/events';
 import { importRoutes } from './routes/imports';
 import { recordRoutes } from './routes/records';
 import { healthRoutes, type HealthDeps } from './routes/health';
@@ -50,6 +51,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         await api.register(activityRoutes(options.db));
         await api.register(recordRoutes(options.db));
         await api.register(adminRoutes(options.db));
+        await api.register(eventRoutes(options.db));
       }
       if (options.db && options.storageDir) {
         await api.register(importRoutes(options.db, options.storageDir));

@@ -19,6 +19,7 @@ import {
   formatDistance,
   formatLocalDate,
   type DuplicateConflict,
+  type ValidationIssue,
 } from '@rekordy/core';
 import type { FitErrorCode } from '@rekordy/core/fit';
 import { useQueryClient } from '@tanstack/react-query';
@@ -36,6 +37,7 @@ import {
   isBusy,
   markBatchDuplicates,
   newItem,
+  reviewField,
   reviewQueue,
   summarize,
   toCheckItem,
@@ -216,6 +218,7 @@ export function FitImport() {
       patchItem(key, (current) => ({ ...current, status: 'saved', savedId: saved.id }));
       notifications.show({ color: 'green', message: t(f.review.saved, { name: saved.name }) });
       void queryClient.invalidateQueries({ queryKey: ['activities'] });
+      void queryClient.invalidateQueries({ queryKey: ['events'] });
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
         const conflict = error.body as DuplicateConflict;
@@ -233,6 +236,20 @@ export function FitImport() {
                 values: { ...current.values!, confirmSimilar: false },
               },
         );
+        return;
+      }
+      const issues =
+        error instanceof ApiError && error.status === 400
+          ? ((error.body as { issues?: ValidationIssue[] } | null)?.issues ?? [])
+          : [];
+      if (issues.length > 0) {
+        // E.g. the chosen event was deleted meanwhile: the item stays in the review.
+        patchItem(key, (current) => ({ ...current, status: previousStatus }));
+        setErrors((current) => ({
+          ...current,
+          [key]: Object.fromEntries(issues.map((i) => [reviewField(i.path[0]), i.code])),
+        }));
+        setSelectedKey(key);
         return;
       }
       if (error instanceof ApiError && error.status === 422) {

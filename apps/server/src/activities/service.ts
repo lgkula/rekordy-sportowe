@@ -14,7 +14,8 @@ import {
 import { asc, count, desc, eq, type SQL } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { isDuplicateEntry } from '../db/errors';
-import { activities, activityStreams, efforts } from '../db/schema';
+import { activities, activityStreams, efforts, events } from '../db/schema';
+import { eventAssignmentIssue, findOrCreateEvent } from '../events/service';
 import { findHardDuplicate, findSimilarActivities } from './duplicates';
 import { getManualEffortInput, recomputeEfforts, setManualEffort } from './efforts';
 import { activityMessages } from './messages';
@@ -66,7 +67,10 @@ export async function getActivityDetail(db: Executor, id: number): Promise<Activ
     .from(efforts)
     .where(eq(efforts.activityId, id))
     .orderBy(asc(efforts.targetM));
-  return toDetail(row, effortRows);
+  const [event] = row.eventId
+    ? await db.select({ name: events.name }).from(events).where(eq(events.id, row.eventId))
+    : [];
+  return toDetail(row, effortRows, event?.name ?? null);
 }
 
 /**
@@ -82,10 +86,11 @@ function simpleDurationS(
   return distanceM <= DISTANCES[manualEffort.distanceKey].targetM ? manualEffort.durationS : null;
 }
 
-/** Maps a validated create body to a row and the optional hand-entered result. */
+/** Maps a validated create body to a row, the optional hand-entered result and new event. */
 export function fromCreateInput(input: ActivityCreate): {
   row: NewActivityRow;
   manualEffort: ManualEffortInput | null;
+  newEventName: string | null;
 } {
   const common = {
     sport: input.sport,
@@ -102,8 +107,11 @@ export function fromCreateInput(input: ActivityCreate): {
         durationS: simpleDurationS(input.distanceM, input.durationS, input.manualEffort),
       },
       manualEffort: input.manualEffort,
+      newEventName: null,
     };
   }
+  const newEventName = input.newEventName ?? null;
+  const eventId = newEventName === null ? (input.eventId ?? null) : null;
   return {
     row: {
       ...common,
@@ -112,23 +120,35 @@ export function fromCreateInput(input: ActivityCreate): {
       durationS: input.durationS,
       elapsedS: input.elapsedS ?? null,
       elevationGainM: input.elevationGainM ?? null,
-      isRace: input.isRace,
+      // An event assignment marks the activity as a race.
+      isRace: input.isRace || eventId !== null || newEventName !== null,
       isHidden: input.isHidden,
+      eventId,
       editionLabel: input.editionLabel ?? null,
       notes: input.notes ?? null,
       splits: input.splits ?? null,
     },
     manualEffort: null,
+    newEventName,
   };
 }
 
-export type CreateResult = { ok: true; id: number } | { ok: false; conflict: DuplicateConflict };
+export type CreateResult =
+  | { ok: true; id: number }
+  | { ok: false; conflict: DuplicateConflict }
+  /** The chosen event does not exist or is of another sport. */
+  | { ok: false; issues: ValidationIssue[] };
 
 export type CreateOptions = {
   manualEffort?: ManualEffortInput | null;
   confirmDuplicate?: boolean;
   /** Recorded samples (imports); stored in `activity_streams` and used for the efforts. */
   stream?: Stream | null;
+  /**
+   * Creates (or reuses, by name) an event of the activity's sport and assigns the activity
+   * to it; overrides `row.eventId`.
+   */
+  newEventName?: string | null;
   /** Runs after the duplicate checks, before anything is inserted (e.g. storing the file). */
   beforeInsert?: () => Promise<void>;
 };
@@ -171,14 +191,27 @@ export async function createActivity(
     }
   }
 
+  const newEventName = options.newEventName ?? null;
+  if (newEventName === null && row.eventId != null) {
+    const issue = await eventAssignmentIssue(db, row.eventId, row.sport);
+    if (issue) return { ok: false, issues: [issue] };
+  }
+
   const streamData = options.stream ? await encodeStream(options.stream) : null;
   await options.beforeInsert?.();
 
   try {
     const id = await db.transaction(async (tx) => {
+      const eventId =
+        newEventName === null ? row.eventId : await findOrCreateEvent(tx, row.sport, newEventName);
       const [inserted] = await tx
         .insert(activities)
-        .values({ ...row, hasStream: streamData !== null })
+        .values({
+          ...row,
+          eventId,
+          isRace: row.isRace || eventId != null,
+          hasStream: streamData !== null,
+        })
         .$returningId();
       const activityId = inserted!.id;
       if (streamData) await tx.insert(activityStreams).values({ activityId, data: streamData });
@@ -226,15 +259,39 @@ export async function patchActivity(
   const elapsedS = patch.elapsedS !== undefined ? patch.elapsedS : existing.elapsedS;
 
   const issues = activityIssues({ sport, distanceM, durationS, elapsedS, manualEffort });
+
+  // An event assignment marks the activity as a race; an activity un-marked as a race (with
+  // no event in the same request) leaves its event.
+  const newEventName = patch.newEventName ?? null;
+  const assigning = newEventName !== null || patch.eventId != null;
+  const isRace = assigning || (patch.isRace ?? existing.isRace);
+  let eventId = patch.eventId !== undefined ? patch.eventId : existing.eventId;
+  if (!isRace || newEventName !== null) eventId = null;
+  if (eventId !== null) {
+    const issue = await eventAssignmentIssue(db, eventId, sport);
+    if (issue) issues.push(issue);
+  }
   if (issues.length > 0) return { ok: false, reason: 'invalid', issues };
 
-  const { manualEffort: _manualEffort, startTimeUtc, ...fields } = patch;
-  const set: Partial<NewActivityRow> = { ...fields, durationS, updatedAt: new Date() };
+  const {
+    manualEffort: _manualEffort,
+    newEventName: _newEventName,
+    startTimeUtc,
+    ...fields
+  } = patch;
+  const set: Partial<NewActivityRow> = {
+    ...fields,
+    isRace,
+    eventId,
+    durationS,
+    updatedAt: new Date(),
+  };
   if (startTimeUtc !== undefined) {
     set.startTimeUtc = startTimeUtc ? toSqlDateTime(startTimeUtc) : null;
   }
 
   await db.transaction(async (tx) => {
+    if (newEventName !== null) set.eventId = await findOrCreateEvent(tx, sport, newEventName);
     await tx.update(activities).set(set).where(eq(activities.id, id));
     const manualChanged =
       patch.manualEffort !== undefined ||

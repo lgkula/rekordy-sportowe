@@ -59,6 +59,8 @@ describe('import state', () => {
       sport: 'road_run',
       isRace: true,
       isHidden: false,
+      event: { kind: 'none' },
+      editionLabel: '',
       activityUrl: '',
       notes: '',
       confirmSimilar: false,
@@ -167,6 +169,8 @@ describe('import state', () => {
         sport: 'road_run',
         isRace: true,
         isHidden: false,
+        eventId: null,
+        editionLabel: null,
         activityUrl: 'https://www.strava.com/activities/1',
         notes: null,
       },
@@ -178,6 +182,27 @@ describe('import state', () => {
     expect(toMeta({ ...values, name: ' ', activityUrl: 'garmin' }, false)).toEqual({
       ok: false,
       errors: { name: 'required', activityUrl: 'invalid_url' },
+    });
+  });
+
+  it('sends the event and edition of a race only', () => {
+    const values = {
+      ...parsedItem('a.fit').values!,
+      event: { kind: 'new' as const, name: 'Bieg Niepodległości' },
+      editionLabel: 'jesień',
+    };
+    expect(toMeta(values, false)).toMatchObject({
+      ok: true,
+      meta: { eventId: null, newEventName: 'Bieg Niepodległości', editionLabel: 'jesień' },
+    });
+    const existing = { ...values, event: { kind: 'existing' as const, id: 4, name: 'X' } };
+    expect(toMeta(existing, false)).toMatchObject({ ok: true, meta: { eventId: 4 } });
+    const notRace = toMeta({ ...existing, isRace: false }, false);
+    expect(notRace).toMatchObject({ ok: true, meta: { eventId: null, editionLabel: null } });
+    expect(notRace.ok && 'newEventName' in notRace.meta).toBe(false);
+    expect(toMeta({ ...values, event: { kind: 'new', name: ' ' } }, false)).toEqual({
+      ok: false,
+      errors: { event: 'required' },
     });
   });
 

@@ -137,6 +137,7 @@ describe('editing', () => {
     elapsedS: null,
     elevationGainM: null,
     eventId: null,
+    eventName: null,
     editionLabel: null,
     notes: null,
     externalId: null,
@@ -201,9 +202,48 @@ describe('editing', () => {
       isRace: false,
       isHidden: true,
       editionLabel: null,
+      eventId: null,
       notes: null,
       activityUrl: null,
       splits: null,
     });
+  });
+
+  it('keeps the event of a race and moves it to another one', () => {
+    const race = { ...detail, isRace: true, eventId: 4, eventName: 'Bieg na Ślężę' };
+    const form = detailToFormValues(race);
+    expect(form.event).toEqual({ kind: 'existing', id: 4, name: 'Bieg na Ślężę' });
+    const moved = parseActivityForm(
+      { ...form, duration: '55:00', event: { kind: 'existing', id: 9, name: 'X' } },
+      'full',
+    );
+    expect(moved.ok && toPatch(moved.input)).toMatchObject({ isRace: true, eventId: 9 });
+  });
+});
+
+describe('event of a race', () => {
+  const race = (overrides: Partial<ActivityFormValues>) =>
+    values({ distance: '10', duration: '45:00', isRace: true, ...overrides });
+
+  it('creates a new event with the activity', () => {
+    const result = parseActivityForm(
+      race({ event: { kind: 'new', name: 'Bieg Niepodległości' }, editionLabel: '2026' }),
+      'full',
+    );
+    expect(result.ok && result.input).toMatchObject({
+      isRace: true,
+      eventId: null,
+      newEventName: 'Bieg Niepodległości',
+      editionLabel: '2026',
+    });
+  });
+
+  it('drops the event and the edition when the activity is not a race', () => {
+    const result = parseActivityForm(
+      race({ isRace: false, event: { kind: 'existing', id: 3, name: 'X' }, editionLabel: '2026' }),
+      'full',
+    );
+    expect(result.ok && result.input).toMatchObject({ eventId: null, editionLabel: null });
+    expect(result.ok && 'newEventName' in result.input).toBe(false);
   });
 });

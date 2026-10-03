@@ -73,12 +73,17 @@ export function toEffort(row: EffortRow): Effort {
   };
 }
 
-export function toDetail(row: ActivityRow, effortRows: EffortRow[]): ActivityDetail {
+export function toDetail(
+  row: ActivityRow,
+  effortRows: EffortRow[],
+  eventName: string | null,
+): ActivityDetail {
   return {
     ...toListItem(row),
     elapsedS: row.elapsedS,
     elevationGainM: row.elevationGainM,
     eventId: row.eventId,
+    eventName,
     editionLabel: row.editionLabel,
     notes: row.notes,
     externalId: row.externalId,

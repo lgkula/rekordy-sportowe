@@ -7,6 +7,7 @@ import {
   type Sport,
 } from '@rekordy/core';
 import type { FitActivity, FitDetails, FitErrorCode, FitParseResult } from '@rekordy/core/fit';
+import { eventAssignment, NO_EVENT, type EventChoice } from '../events/eventChoice';
 
 /**
  * State of the FIT import (PLAN.md 6.2), kept free of React so it can be unit-tested:
@@ -47,6 +48,9 @@ export type ReviewValues = {
   sport: Sport;
   isRace: boolean;
   isHidden: boolean;
+  /** Event and edition label: used only for a race. */
+  event: EventChoice;
+  editionLabel: string;
   activityUrl: string;
   notes: string;
   /** Save even though a similar activity exists. */
@@ -90,6 +94,8 @@ export function defaultValues(activity: FitActivity): ReviewValues {
     sport: activity.sport,
     isRace: activity.isRace,
     isHidden: false,
+    event: NO_EVENT,
+    editionLabel: '',
     activityUrl: activity.activityUrl ?? '',
     notes: '',
     confirmSimilar: false,
@@ -189,6 +195,11 @@ export function approvableWithoutReview(items: readonly ImportItem[]): ImportIte
   );
 }
 
+/** Review field that shows an error of a meta (or server) path. */
+export function reviewField(path: PropertyKey | undefined): keyof ReviewValues {
+  return path === 'eventId' || path === 'newEventName' ? 'event' : (path as keyof ReviewValues);
+}
+
 export type MetaResult =
   | { ok: true; meta: FitImportMeta }
   | { ok: false; errors: Partial<Record<keyof ReviewValues, string>> };
@@ -200,6 +211,9 @@ export function toMeta(values: ReviewValues, needsConfirmation: boolean): MetaRe
     sport: values.sport,
     isRace: values.isRace,
     isHidden: values.isHidden,
+    ...(values.isRace
+      ? { ...eventAssignment(values.event), editionLabel: values.editionLabel }
+      : { eventId: null, editionLabel: null }),
     activityUrl: values.activityUrl.trim(),
     notes: values.notes,
     confirmDuplicate: needsConfirmation ? values.confirmSimilar : undefined,
@@ -207,8 +221,7 @@ export function toMeta(values: ReviewValues, needsConfirmation: boolean): MetaRe
   if (parsed.success) return { ok: true, meta: parsed.data };
   const errors: Partial<Record<keyof ReviewValues, string>> = {};
   for (const issue of parsed.error.issues) {
-    const field = issue.path[0] as keyof ReviewValues;
-    errors[field] ??= issue.message;
+    errors[reviewField(issue.path[0])] ??= issue.message;
   }
   return { ok: false, errors };
 }

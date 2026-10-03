@@ -25,6 +25,8 @@ import {
 import { useMemo } from 'react';
 import { EffortsTable } from '../components/EffortsTable';
 import { SplitsView } from '../components/SplitsView';
+import { NO_EVENT } from '../events/eventChoice';
+import { EventPicker } from '../events/EventPicker';
 import { pl } from '../i18n/pl';
 import { t } from '../i18n/template';
 import { averagePace, type ImportItem, type ReviewValues } from './importState';
@@ -181,7 +183,11 @@ export function FitReview({
             label={r.fields.sport}
             data={sportOptions}
             value={values.sport}
-            onChange={(value) => value && onChange({ sport: value as ReviewValues['sport'] })}
+            onChange={(value) => {
+              if (!value || value === values.sport) return;
+              // Events belong to one sport.
+              onChange({ sport: value as ReviewValues['sport'], event: NO_EVENT });
+            }}
             allowDeselect={false}
           />
           <TextInput
@@ -205,6 +211,27 @@ export function FitReview({
             />
           </Stack>
         </SimpleGrid>
+        {values.isRace && (
+          <Paper withBorder p="md">
+            <SimpleGrid cols={{ base: 1, sm: 2 }}>
+              <EventPicker
+                sport={values.sport}
+                value={values.event}
+                onChange={(event) => onChange({ event })}
+                activityName={values.name}
+                onRename={(name) => onChange({ name })}
+                error={validationText(errors.event)}
+              />
+              <TextInput
+                label={r.fields.editionLabel}
+                description={r.fields.editionLabelHint}
+                value={values.editionLabel}
+                onChange={(event) => onChange({ editionLabel: event.currentTarget.value })}
+                error={validationText(errors.editionLabel)}
+              />
+            </SimpleGrid>
+          </Paper>
+        )}
         <Textarea
           label={r.fields.notes}
           value={values.notes}

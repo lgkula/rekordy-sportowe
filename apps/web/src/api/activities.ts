@@ -36,10 +36,16 @@ export function useActivity(id: number | undefined) {
   });
 }
 
-/** Mutations refresh every activity query (list pages and details). */
+/**
+ * Mutations refresh every activity query (list pages and details) and the races view, which
+ * shows race activities as editions.
+ */
 function useInvalidateActivities() {
   const queryClient = useQueryClient();
-  return () => queryClient.invalidateQueries({ queryKey: activitiesKey });
+  return () =>
+    Promise.all(
+      [activitiesKey, ['events']].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+    );
 }
 
 export function useCreateActivity() {
